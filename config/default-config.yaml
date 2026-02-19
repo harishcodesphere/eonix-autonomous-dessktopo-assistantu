@@ -1,0 +1,39 @@
+# Eonix Default Configuration
+
+system:
+  name: "Eonix"
+  version: "1.0.0"
+  log_level: "INFO"
+  language: "en"
+
+ai:
+  provider: "ollama"
+  ollama_host: "http://localhost:11434"
+  default_model: "llama3"
+  chat_model: "llama3"
+  fast_model: "mistral"
+  temperature: 0.7
+
+voice:
+  enabled: true
+  wake_word: "hey eonix"
+  stt_provider: "whisper"
+  tts_provider: "piper"
+  voice_id: "en_US-amy-medium"
+
+permissions:
+  require_confirmation: true
+  allow_system_control: true
+  allow_file_deletion: false
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins: ["*"]
+
+plugins:
+  auto_update: true
+  enabled:
+    - "dev_tools"
+    - "productivity"
+    - "browser_automation"
