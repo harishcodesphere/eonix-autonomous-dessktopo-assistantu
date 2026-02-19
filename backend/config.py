@@ -13,29 +13,16 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash"
 
-# ── Default brain routing ──────────────────────────────────────
-# "local" | "gemini" | "auto"
-DEFAULT_BRAIN = os.getenv("DEFAULT_BRAIN", "auto")
+# ── Compatibility Settings ─────────────────────────────────────
+# This class mimics the `settings` object expected by some legacy imports
+class Settings:
+    OLLAMA_HOST = OLLAMA_URL
+    OLLAMA_MODEL = OLLAMA_MODEL
+    GEMINI_API_KEY = GOOGLE_API_KEY
+    GEMINI_MODEL = GEMINI_MODEL
 
-# ── Complexity threshold for routing ──────────────────────────
-COMPLEXITY_THRESHOLD = 0.6
+settings = Settings()
 
-# ── Database ───────────────────────────────────────────────────
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "eonix_memory.db")
-
-# ── Tool settings ──────────────────────────────────────────────
-TYPING_DELAY = 0.04
-APP_LAUNCH_WAIT = 2.5
-COMMAND_TIMEOUT = 30
-
-# ── Server ─────────────────────────────────────────────────────
-HOST = "127.0.0.1"
-PORT = 8000
-
-# ── Voice ──────────────────────────────────────────────────────
-ENABLE_VOICE = os.getenv("ENABLE_VOICE", "true").lower() == "true"
-VOICE_RATE = int(os.getenv("VOICE_RATE", "175"))
-VOICE_VOLUME = float(os.getenv("VOICE_VOLUME", "0.9"))
-
-# ── Safety ─────────────────────────────────────────────────────
-REQUIRE_CONFIRMATION = os.getenv("REQUIRE_CONFIRMATION", "false").lower() == "true"
+# ── System Settings ────────────────────────────────────────────
+# Set to True to require user confirmation for destructive actions
+REQUIRE_CONFIRMATION = os.getenv("REQUIRE_CONFIRMATION", "False").lower() == "true"

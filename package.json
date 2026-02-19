@@ -14,5 +14,8 @@
     "devDependencies": {
         "concurrently": "^8.2.1",
         "electron": "^40.4.1"
+    },
+    "dependencies": {
+        "convex": "^1.32.0"
     }
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { PluginManager } from './components/Plugins/PluginManager'
 import { Sidebar } from './components/Common/Sidebar'
 import { ChatInterface } from './components/Chat/ChatInterface'
 import { SystemMetrics } from './components/Dashboard/SystemMetrics'
@@ -73,9 +74,9 @@ export default function App() {
                                 animate={{ opacity: 1, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.95 }}
                                 transition={{ duration: 0.3 }}
-                                className="p-8 text-center text-gray-500 h-full flex items-center justify-center"
+                                className="h-full w-full overflow-hidden"
                             >
-                                <PluginManagerPlaceholder />
+                                <PluginManager />
                             </motion.div>
                         )}
 

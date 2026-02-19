@@ -21,6 +21,7 @@ from memory.task_store import create_task, update_task, get_recent_tasks
 from memory.preference_store import get_preference, set_preference
 from memory.semantic import SemanticMemory
 from agent.personality import PersonalityEngine
+from ai.chatbot import chatbot as chatbot_engine
 
 
 @dataclass
@@ -273,6 +274,19 @@ class AgentOrchestrator:
             reply = plan.get("response", "Done!")
             steps = plan.get("steps", [])
 
+            # ── CHATBOT ROUTING ──
+            # If no tool steps → it's a general question → route to chatbot
+            if not steps and plan is not None:
+                try:
+                    chat_result = await chatbot_engine.chat(
+                        clean_input, conversation_history
+                    )
+                    reply = chat_result["reply"]
+                    brain = chat_result.get("brain", brain)
+                except Exception as chat_err:
+                    print(f"Chatbot fallback error: {chat_err}")
+                    # Keep the original plan response as fallback
+
             # Execute each step
             loop = asyncio.get_event_loop()
             for step in steps:
@@ -281,6 +295,25 @@ class AgentOrchestrator:
                 description = step.get("description", tool_name)
 
                 if not tool_name:
+                    continue
+
+                # ── SAFETY CHECK ──
+                # Block destructive actions if confirmation is required
+                DESTRUCTIVE_TOOLS = ["delete_file", "remove_file", "shutdown", "reboot"]
+                is_destructive = any(dt in tool_name for dt in DESTRUCTIVE_TOOLS) or \
+                                ("delete" in description.lower()) or \
+                                ("shutdown" in description.lower())
+                
+                # Check config.REQUIRE_CONFIRMATION (default false for now)
+                from config import REQUIRE_CONFIRMATION
+                if is_destructive and REQUIRE_CONFIRMATION:
+                    # In a real app, we'd emit a confirmation request event
+                    reply = f"⚠️ Safety Stop: I need your confirmation to execute '{tool_name}' ({description}). Action blocked."
+                    actions.append({
+                        "tool": tool_name,
+                        "success": False, 
+                        "result": "Blocked by safety setting"
+                    })
                     continue
 
                 # Run blocking tool in thread pool so we don't block the event loop
@@ -382,6 +415,20 @@ class AgentOrchestrator:
         steps = plan.get("steps", [])
         reply = plan.get("response", "Done!")
         actions = []
+
+        # ── CHATBOT ROUTING ──
+        # If no tool steps → it's a general question → route to chatbot
+        if not steps:
+            try:
+                yield {"type": "thinking", "brain": brain, "message": "Crafting a thoughtful response..."}
+                chat_result = await chatbot_engine.chat(
+                    clean_input, conversation_history
+                )
+                reply = chat_result["reply"]
+                brain = chat_result.get("brain", brain)
+            except Exception as chat_err:
+                print(f"Chatbot fallback error: {chat_err}")
+                # Keep the original plan response as fallback
 
         # Execute steps and stream updates
         db = get_db()

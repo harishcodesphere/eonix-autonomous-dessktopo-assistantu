@@ -4,6 +4,8 @@ export interface Message {
     content: string
     timestamp: number
     intent?: string
+    brain?: string
+    actions?: Array<{ tool: string; description: string; success: boolean }>
 }
 
 export interface SystemStats {
