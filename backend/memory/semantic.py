@@ -10,7 +10,8 @@ try:
     import chromadb
     from chromadb.config import Settings as ChromaSettings
     CHROMADB_AVAILABLE = True
-except ImportError:
+except Exception as e:
+    print(f"WARNING: SemanticMemory: Could not import chromadb ({e}). Using in-memory fallback.")
     chromadb = None  # type: ignore[assignment]
     CHROMADB_AVAILABLE = False
 
@@ -26,7 +27,8 @@ class SemanticMemory:
         self.fallback_memory: List[Dict[str, Any]] = []  # Simple list of dicts {text, metadata, id}
 
         if not CHROMADB_AVAILABLE:
-            print("⚠️ SemanticMemory: chromadb module not found. Using in-memory fallback.")
+            # Avoid UnicodeEncodeError on Windows consoles with non-UTF8 codepages.
+            print("WARNING: SemanticMemory: chromadb module not found. Using in-memory fallback.")
             self.is_fallback = True
             return
 
@@ -42,10 +44,10 @@ class SemanticMemory:
                 name="user_knowledge",
                 metadata={"hnsw:space": "cosine"}
             )
-            print(f"✓ SemanticMemory: Connected to ChromaDB at {self.db_path}")
+            print(f"OK: SemanticMemory: Connected to ChromaDB at {self.db_path}")
             
         except Exception as e:
-            print(f"⚠️ SemanticMemory: ChromaDB init failed ({e}). Using in-memory fallback.")
+            print(f"WARNING: SemanticMemory: ChromaDB init failed ({e}). Using in-memory fallback.")
             self.is_fallback = True
             self.client = None
             self.collection = None
@@ -74,7 +76,7 @@ class SemanticMemory:
             )
             return fact_id
         except Exception as e:
-            print(f"❌ store_fact error: {e}")
+            print(f"ERROR: store_fact error: {e}")
             return ""
 
     def retrieve_relevant(self, query: str, n_results: int = 3) -> List[Dict[str, Any]]:
@@ -130,7 +132,7 @@ class SemanticMemory:
             return memories
             
         except Exception as e:
-            print(f"❌ retrieve_relevant error: {e}")
+            print(f"ERROR: retrieve_relevant error: {e}")
             return []
 
     def delete_fact(self, fact_id: str) -> None:
@@ -141,7 +143,12 @@ class SemanticMemory:
         try:
             self.collection.delete(ids=[fact_id])
         except Exception as e:
-            print(f"❌ delete_fact error: {e}")
+            print(f"ERROR: delete_fact error: {e}")
+
+    def store_user_fact(self, key: str, value: str) -> str:
+        """Store a structured user fact (e.g., key='name', value='Harish')."""
+        text = f"User's {key} is {value}"
+        return self.store_fact(text, metadata={"type": "user_fact", "key": key, "value": str(value)})
 
     def get_all(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent memories."""
@@ -189,7 +196,7 @@ class SemanticMemory:
             return memories
             
         except Exception as e:
-            print(f"❌ get_all error: {e}")
+            print(f"ERROR: get_all error: {e}")
             return []
 
 # Global instance

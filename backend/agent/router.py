@@ -86,7 +86,10 @@ def parse_brain_prefix(user_input: str) -> Tuple[Optional[str], str]:
         "@local": "local",
         "@ollama": "local",
         "@gemini": "gemini",
+        "@gemini": "gemini",
         "@google": "gemini",
+        "@claude": "claude",
+        "@anthropic": "claude",
     }
     for prefix, brain in prefixes.items():
         if user_input.lower().startswith(prefix):

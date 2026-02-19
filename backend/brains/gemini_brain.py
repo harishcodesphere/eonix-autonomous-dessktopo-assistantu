@@ -44,6 +44,8 @@ Available tools:
 - remember_fact(fact: str) [Store important user info/preferences permanently]
 - read_screen(question: str) [Take screenshot and analyze with AI vision]
 - ocr_screen() [Extract all text visible on screen]
+- find_on_screen(element_description: str) [Find x,y coordinates of UI element]
+- click_element(description: str) [Visually find and click an element]
 
 Respond ONLY with valid JSON:
 {
@@ -66,6 +68,7 @@ class GeminiBrain:
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=GOOGLE_API_KEY)
+                # Ensure we use the model name from config
                 self._client = genai.GenerativeModel(GEMINI_MODEL)
             except Exception:
                 self._client = None
@@ -85,7 +88,7 @@ class GeminiBrain:
             self._available = False
         return bool(self._available)
 
-    def plan(self, user_message: str, context: str = "") -> Dict[str, Any]:
+    async def plan(self, user_message: str, context: str = "") -> Dict[str, Any]:
         """Get a JSON execution plan from Gemini."""
         client = self._get_client()
         if not client:
@@ -102,7 +105,9 @@ class GeminiBrain:
         prompt += f"\n\nUser command: {user_message}"
 
         try:
-            response = client.generate_content(prompt)
+            # Using asyncio.to_thread for the blocking SDK call
+            import asyncio
+            response = await asyncio.to_thread(client.generate_content, prompt)
             content = response.text.strip()
             # Extract JSON
             match = re.search(r'\{.*\}', content, re.DOTALL)
@@ -124,28 +129,29 @@ class GeminiBrain:
                 "response": f"Gemini error: {str(e)}"
             }
 
-    def chat(self, message: str, image_path: Optional[str] = None) -> str:
+    async def chat(self, message: str, image_path: Optional[str] = None) -> str:
         """Chat with optional image input."""
         client = self._get_client()
         if not client:
             return "Gemini is not available."
 
         try:
+            import asyncio
             if image_path:
                 import PIL.Image
                 img = PIL.Image.open(image_path)
-                response = client.generate_content([message, img])
+                response = await asyncio.to_thread(client.generate_content, [message, img])
             else:
-                response = client.generate_content(message)
+                response = await asyncio.to_thread(client.generate_content, message)
             return response.text
         except Exception as e:
             return f"Gemini error: {str(e)}"
 
-    def analyze_screen(self, screenshot_path: str, question: str) -> str:
+    async def analyze_screen(self, screenshot_path: str, question: str) -> str:
         """Analyze a screenshot and answer a question about it."""
-        return self.chat(f"Looking at this screenshot: {question}", screenshot_path)
+        return await self.chat(f"Looking at this screenshot: {question}", screenshot_path)
 
-    def plan_from_screen(self, screenshot_path: str, goal: str) -> Dict[str, Any]:
+    async def plan_from_screen(self, screenshot_path: str, goal: str) -> Dict[str, Any]:
         """Given a screenshot and goal, plan what to do."""
         prompt = f"""I'm an AI agent controlling a Windows PC.
 Goal: {goal}
@@ -156,8 +162,9 @@ Respond with JSON plan as specified."""
             return {"intent": "error", "steps": [], "response": "Gemini unavailable"}
         try:
             import PIL.Image
+            import asyncio
             img = PIL.Image.open(screenshot_path)
-            response = client.generate_content([GEMINI_SYSTEM + "\n\n" + prompt, img])
+            response = await asyncio.to_thread(client.generate_content, [GEMINI_SYSTEM + "\n\n" + prompt, img])
             content = response.text.strip()
             match = re.search(r'\{.*\}', content, re.DOTALL)
             if match:

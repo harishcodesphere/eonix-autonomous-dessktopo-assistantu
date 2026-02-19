@@ -12,17 +12,28 @@ BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 # 2. Guarded imports for third-party libraries
+FastAPI = Request = CORSMiddleware = StaticFiles = FileResponse = JSONResponse = None
 try:
     from fastapi import FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
     from fastapi.responses import FileResponse, JSONResponse
 except ImportError:
-    print("❌ Critical Error: FastAPI and dependencies not found. Please install requirements.")
+    print("ERROR: Critical Error: FastAPI and dependencies not found. Please install requirements.")
     sys.exit(1)
 
 # 3. Local module imports (guarded)
+init_db = chat_router = system_router = tasks_router = voice_router = memory_router = ws_router = ws_manager = push_alert = None
+OllamaBrain = GeminiBrain = ClaudeBrain = system_monitor = scheduler = plugin_loader = voice_system = global_orchestrator = None
+briefing_router = workflows_router = briefing = workflow_engine = clipboard_monitor = clipboard_router = None
+ClipboardMonitor = None
+analytics_router = usage_tracker_instance = None
+security_router = security_monitor_bg = None
+
 try:
     from memory.db import init_db
     from api.routes_chat import router as chat_router
@@ -39,9 +50,25 @@ try:
     from agent.plugin_loader import plugin_loader
     from tools.voice import voice_system
     from agent.orchestrator import orchestrator as global_orchestrator
-except ImportError as e:
-    print(f"⚠ Warning: Some local modules failed to load: {e}")
+    from api.routes_briefing import router as briefing_router
+    from api.routes_workflows import router as workflows_router
+    from agent.briefing import briefing
+    from agent.workflow_engine import workflow_engine
+    from agent.clipboard_monitor import ClipboardMonitor
+    from api.routes_clipboard import router as clipboard_router, set_monitor_instance
+    from api.routes_analytics import router as analytics_router
+    from tools.usage_tracker import usage_tracker as usage_tracker_instance
+    import asyncio
+except Exception as e:
+    print(f"WARNING: Some local modules failed to load: {e}")
     # We continue as some modules might be optional
+
+try:
+    from api.routes_security import router as security_router
+    from tools.security_monitor import security_monitor_bg
+except Exception as e:
+    print(f"WARNING: Security module failed to load: {e}")
+    import traceback; traceback.print_exc()
 
 # Global orchestrator reference
 orchestrator: Any = None 
@@ -54,13 +81,9 @@ DATA_DIR = os.path.join(BACKEND_ROOT, "data")
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────
     print("\n" + "="*50)
-    print("  ███████╗ ██████╗ ███╗  ██╗██╗██╗  ██╗")
-    print("  ██╔════╝██╔═══██╗████╗ ██║██║╚██╗██╔╝")
-    print("  █████╗  ██║   ██║██╔██╗██║██║ ╚███╔╝ ")
-    print("  ██╔══╝  ██║   ██║██║╚████║██║ ██╔██╗ ")
-    print("  ███████╗╚██████╔╝██║ ╚███║██║██╔╝╚██╗")
-    print("  ╚══════╝ ╚═════╝ ╚═╝  ╚══╝╚═╝╚═╝  ╚═╝")
-    print("  Your Local JARVIS — Autonomous Desktop Agent")
+    # Keep startup banner ASCII-only to avoid UnicodeEncodeError on Windows consoles.
+    print("  EONIX")
+    print("  Your Local JARVIS - Autonomous Desktop Agent")
     print("="*50)
 
     # Initialize directories
@@ -70,29 +93,29 @@ async def lifespan(app: FastAPI):
     
     try:
         init_db()
-        print("✓ Database initialized")
+        print("OK: Database initialized")
     except Exception as e:
-        print(f"❌ Database Error: {e}")
+        print(f"ERROR: Database Error: {e}")
 
     # Initialize AI brains
-    ollama = OllamaBrain()
-    gemini = GeminiBrain()
-    claude = ClaudeBrain()
+    ollama = OllamaBrain() if OllamaBrain else None
+    gemini = GeminiBrain() if GeminiBrain else None
+    claude = ClaudeBrain() if ClaudeBrain else None
 
-    if ollama.is_available():
-        print("✓ Ollama (Local AI) — ONLINE")
+    if ollama and ollama.is_available():
+        print("OK: Ollama (Local AI) — ONLINE")
     else:
-        print("⚠ Ollama — OFFLINE (start with: ollama serve)")
+        print("WARNING: Ollama — OFFLINE (start with: ollama serve)")
 
-    if gemini.is_available():
-        print("✓ Gemini — ONLINE")
+    if gemini and gemini.is_available():
+        print("OK: Gemini — ONLINE")
     else:
-        print("⚠ Gemini — API key not set or unavailable")
+        print("WARNING: Gemini — API key not set or unavailable")
 
-    if claude.is_available():
-        print("✓ Claude — ONLINE")
+    if claude and claude.is_available():
+        print("OK: Claude — ONLINE")
     else:
-        print("⚠ Claude — API key not set or unavailable")
+        print("WARNING: Claude — API key not set or unavailable")
 
     # Initialize Orchestrator
     global orchestrator
@@ -101,45 +124,96 @@ async def lifespan(app: FastAPI):
     
     # Start Voice System
     async def broadcast_voice_status(status):
-        if 'ws_manager' in globals():
+        if ws_manager:
             await ws_manager.broadcast({"type": "voice_status", "status": status})
 
-    if 'voice_system' in globals():
+    if voice_system and orchestrator:
         voice_system.set_callback(orchestrator.handle_voice_command)
         voice_system.set_status_callback(broadcast_voice_status)
         voice_system.start()
-        print("✓ Voice System — READY (Listening)")
+        print("OK: Voice System — READY (Listening)")
 
     # Start proactive monitor
-    if 'system_monitor' in globals():
+    if system_monitor:
         system_monitor.on_alert(push_alert)
         asyncio.create_task(system_monitor.start())
-        print("✓ Proactive Monitor — ONLINE")
+        print("OK: Proactive Monitor — ONLINE")
 
     # Start scheduler
-    if 'scheduler' in globals():
+    if scheduler:
+        # constant check for 8 AM briefing
+        has_briefing = any(t.command == "run_briefing" for t in scheduler.tasks)
+        if not has_briefing:
+            from datetime import datetime, timedelta
+            # Default to 8:00 AM tomorrow
+            now = datetime.now()
+            briefing_time_str = os.getenv("BRIEFING_TIME", "08:00")
+            h, m = map(int, briefing_time_str.split(":"))
+            
+            run_at = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if run_at <= now:
+                run_at += timedelta(days=1)
+                
+            scheduler.add("Daily Briefing", "run_briefing", run_at, "daily")
+            print(f"OK: Scheduled Daily Briefing for {run_at}")
+
+        scheduler.on_execute = execute_scheduled_task
         asyncio.create_task(scheduler.start())
 
+    # Load Workflows
+    if workflow_engine:
+        workflow_engine.load_workflows()
+        print("OK: Workflow Engine — LOADED")
+
     # Load plugins
-    if 'plugin_loader' in globals():
+    if plugin_loader:
         plugin_results = plugin_loader.load_all()
         loaded_count = sum(1 for r in plugin_results.values() if r["success"])
-        print(f"✓ Plugins: {loaded_count}/{len(plugin_results)} loaded")
+        print(f"OK: Plugins: {loaded_count}/{len(plugin_results)} loaded")
 
-    print(f"\n🚀 EONIX running at: http://127.0.0.1:8000")
+    # Start Clipboard Monitor
+    try:
+        global clipboard_monitor
+        if ClipboardMonitor:
+            # Pass the running loop to the monitor so it can schedule async alerts
+            loop = asyncio.get_running_loop()
+            clipboard_monitor = ClipboardMonitor(push_alert, loop)
+            clipboard_monitor.start()
+            set_monitor_instance(clipboard_monitor)
+            print("OK: Clipboard Intelligence — ONLINE")
+    except Exception as e:
+        print(f"WARNING: Clipboard Monitor failed to start: {e}")
+
+    # Start Usage Tracker
+    if usage_tracker_instance:
+        usage_tracker_instance.start()
+        print("OK: App Usage Tracker \u2014 ONLINE")
+
+    # Start Security Monitor
+    if security_monitor_bg:
+        security_monitor_bg.start()
+        print("OK: Security Monitor \u2014 ONLINE")
+
+    print("\nEONIX running at: http://127.0.0.1:8000")
     print("="*50 + "\n")
 
     yield
 
     # ── Shutdown ─────────────────────────────────────────────
-    print("\n🛑 EONIX shutting down...")
+    print("\nEONIX shutting down...")
     
-    if 'voice_system' in globals():
+    if voice_system:
         voice_system.stop()
-    if 'system_monitor' in globals():
+    if system_monitor:
         system_monitor.stop()
-    if 'scheduler' in globals():
+    if scheduler:
         scheduler.stop()
+    if usage_tracker_instance:
+        usage_tracker_instance.stop()
+    if security_monitor_bg:
+        security_monitor_bg.stop()
+    if clipboard_monitor:
+        clipboard_monitor.stop()
 
 
 # ── App Setup ────────────────────────────────────────────────
@@ -169,24 +243,64 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # ── API Routes (Include only if loaded) ──────────────────────
 try:
-    app.include_router(chat_router, prefix="/api", tags=["chat"])
-    app.include_router(system_router, prefix="/api", tags=["system"])
-    app.include_router(tasks_router, prefix="/api", tags=["tasks"])
-    app.include_router(voice_router, prefix="/api", tags=["voice"])
-    app.include_router(memory_router, prefix="/api", tags=["memory"])
-    app.include_router(ws_router, tags=["websocket"])
-except NameError:
-    pass
+    if chat_router: app.include_router(chat_router, prefix="/api", tags=["chat"])
+    if system_router: app.include_router(system_router, prefix="/api", tags=["system"])
+    if tasks_router: app.include_router(tasks_router, prefix="/api", tags=["tasks"])
+    if voice_router: app.include_router(voice_router, prefix="/api", tags=["voice"])
+    if memory_router: app.include_router(memory_router, prefix="/api", tags=["memory"])
+    if ws_router: app.include_router(ws_router, tags=["websocket"])
+    if briefing_router: app.include_router(briefing_router, prefix="/api", tags=["briefing"])
+    if workflows_router: app.include_router(workflows_router, prefix="/api", tags=["workflows"])
+    if clipboard_router: app.include_router(clipboard_router, prefix="/api/clipboard", tags=["clipboard"])
+    if analytics_router: app.include_router(analytics_router, prefix="/api", tags=["analytics"])
+    if security_router: app.include_router(security_router, prefix="/api", tags=["security"])
+except Exception as e:
+    print(f"WARNING: Failed to include some routers: {e}")
+
+# ── Scheduler Callback ───────────────────────────────────────
+async def execute_scheduled_task(command: str):
+    """Callback for the scheduler to execute tasks."""
+    print(f"⏰ Scheduler Trigger: {command}")
+    
+    if command == "run_briefing":
+        # 1. Generate Briefing
+        try:
+            from agent.briefing import briefing
+            content = await briefing.generate()
+            
+            # 2. Push to Frontend
+            if push_alert:
+                await push_alert({
+                    "type": "briefing",
+                    "data": content
+                })
+            
+            # 3. Speak it
+            text = briefing.format_text(content)
+            if voice_system:
+                # Use voice system's engine if available, or imports
+                try:
+                    from tools.voice_engine import voice_engine
+                    if voice_engine:
+                        await voice_engine.speak(text)
+                except:
+                    pass
+        except Exception as e:
+            print(f"Briefing execution error: {e}")
+
+# Register callback
+if scheduler:
+    scheduler.on_execute = execute_scheduled_task
 
 # ── Briefing Endpoint ────────────────────────────────────────
 @app.get("/api/briefing")
 async def get_briefing():
     """Get a daily briefing summary."""
     try:
-        from agent.briefing import daily_briefing
-        briefing = await daily_briefing.generate()
-        text = daily_briefing.format_text(briefing)
-        return {"briefing": briefing, "text": text}
+        from agent.briefing import briefing
+        content = await briefing.generate()
+        text = briefing.format_text(content)
+        return {"briefing": content, "text": text}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -228,4 +342,4 @@ if __name__ == "__main__":
             log_level="warning"
         )
     except ImportError:
-        print("❌ Uvicorn not found. Please install it.")
+        print("ERROR: Uvicorn not found. Please install it.")

@@ -95,7 +95,7 @@ class TaskScheduler:
     async def start(self):
         """Start the scheduler loop."""
         self.running = True
-        print("⏰ Task Scheduler: ONLINE")
+        print("Task Scheduler: ONLINE")
         while self.running:
             try:
                 now = datetime.now()
@@ -106,7 +106,7 @@ class TaskScheduler:
                         
                     if now >= task.run_at:
                         # Execute the task
-                        print(f"⏰ Executing scheduled task: {task.name}")
+                        print(f"Executing scheduled task: {task.name}")
                         if self.on_execute:
                             try:
                                 callback = self.on_execute
@@ -115,7 +115,7 @@ class TaskScheduler:
                                 else:
                                     callback(task.command)
                             except Exception as e:
-                                print(f"❌ Scheduled task execution error: {e}")
+                                print(f"ERROR: Scheduled task execution error: {e}")
 
                         # Handle repeat
                         if task.repeat == "daily":
@@ -129,13 +129,13 @@ class TaskScheduler:
 
                         self._save()
             except Exception as e:
-                print(f"❌ Scheduler loop error: {e}")
+                print(f"ERROR: Scheduler loop error: {e}")
                 
             await asyncio.sleep(30)  # Check every 30 seconds
 
     def stop(self):
         self.running = False
-        print("⏰ Task Scheduler: OFFLINE")
+        print("Task Scheduler: OFFLINE")
 
 
 # Global instance

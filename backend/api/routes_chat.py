@@ -17,6 +17,7 @@ class ChatRequest(BaseModel):
     message: str
     history: Optional[List[Dict[str, Any]]] = None
     stream: Optional[bool] = True
+    brain: Optional[str] = None
 
 
 @router.post("/chat")
@@ -25,9 +26,19 @@ async def chat(request: ChatRequest):
 
     if request.stream:
         async def event_stream():
-            async for event in orchestrator.stream_process(request.message, request.history):
-                yield f"data: {json.dumps(event)}\n\n"
-                await asyncio.sleep(0)
+            try:
+                async for event in orchestrator.stream_process(request.message, request.history, brain_override=request.brain):
+                    try:
+                        payload = json.dumps(event, default=str)
+                    except Exception as ser_err:
+                        print(f"[SSE] Serialization error: {ser_err}")
+                        payload = json.dumps({"type": "error", "message": str(ser_err)})
+                    yield f"data: {payload}\n\n"
+                    await asyncio.sleep(0)
+            except Exception as stream_err:
+                print(f"[SSE] Stream error: {stream_err}")
+                import traceback; traceback.print_exc()
+                yield f"data: {json.dumps({'type': 'error', 'message': str(stream_err)})}\n\n"
 
         return StreamingResponse(
             event_stream(),
@@ -40,7 +51,7 @@ async def chat(request: ChatRequest):
         )
     else:
         # Non-streaming JSON response
-        result = await orchestrator.process(request.message, request.history)
+        result = await orchestrator.process(request.message, request.history, brain_override=request.brain)
         return {
             "reply": result.reply,
             "brain": result.brain,

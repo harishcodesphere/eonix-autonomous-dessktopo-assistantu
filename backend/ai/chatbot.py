@@ -119,7 +119,7 @@ class Chatbot:
             gemini = self._get_gemini()
             if gemini:
                 try:
-                    reply = gemini.chat(user_message)
+                    reply = await gemini.chat(user_message)
                     brain = "gemini"
                 except Exception as e:
                     logger.error(f"Gemini fallback failed: {e}")

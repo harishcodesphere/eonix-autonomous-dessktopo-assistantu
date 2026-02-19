@@ -76,7 +76,7 @@ class OllamaBrain:
         except Exception:
             return False
 
-    def plan(self, user_message: str, context: str = "") -> Dict[str, Any]:
+    async def plan(self, user_message: str, context: str = "") -> Dict[str, Any]:
         """Get a JSON execution plan from Ollama."""
         system = TOOL_SYSTEM_PROMPT
         if context:
@@ -95,10 +95,11 @@ class OllamaBrain:
         }
 
         try:
-            response = httpx.post(self.url, json=payload, timeout=60)
-            response.raise_for_status()
-            content = response.json()["message"]["content"]
-            return json.loads(content)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(self.url, json=payload, timeout=60)
+                response.raise_for_status()
+                content = response.json()["message"]["content"]
+                return json.loads(content)
         except json.JSONDecodeError as e:
             # Try to extract JSON from response
             try:
@@ -121,7 +122,7 @@ class OllamaBrain:
                 "response": f"Ollama error: {str(e)}"
             }
 
-    def chat(self, messages: List[Dict[str, str]], system: Optional[str] = None) -> str:
+    async def chat(self, messages: List[Dict[str, str]], system: Optional[str] = None) -> str:
         """Plain chat without tool format."""
         payload = {
             "model": self.model,
@@ -132,12 +133,13 @@ class OllamaBrain:
             payload["messages"] = [{"role": "system", "content": system}] + messages
 
         try:
-            response = httpx.post(self.url, json=payload, timeout=60)
-            return response.json()["message"]["content"]
+            async with httpx.AsyncClient() as client:
+                response = await client.post(self.url, json=payload, timeout=60)
+                return response.json()["message"]["content"]
         except Exception as e:
             return f"Ollama error: {str(e)}"
 
-    def quick_classify(self, text: str) -> Dict[str, Any]:
+    async def quick_classify(self, text: str) -> Dict[str, Any]:
         """Quick intent classification for routing decisions."""
         prompt = f"""Classify this command in JSON:
 Command: "{text}"
@@ -145,12 +147,13 @@ Return: {{"intent": "app_control|web_search|system_info|file_op|type_text|genera
 Only JSON, no other text."""
 
         try:
-            response = httpx.post(self.url, json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "format": "json"
-            }, timeout=15)
-            return json.loads(response.json()["message"]["content"])
+            async with httpx.AsyncClient() as client:
+                response = await client.post(self.url, json={
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
+                    "format": "json"
+                }, timeout=15)
+                return json.loads(response.json()["message"]["content"])
         except Exception:
             return {"intent": "general_query", "complexity": 0.5, "needs_visual": False}

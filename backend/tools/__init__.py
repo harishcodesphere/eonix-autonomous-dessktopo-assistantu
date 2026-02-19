@@ -13,6 +13,12 @@ from .whatsapp_tool import WhatsAppTool
 from .browser_controller import BrowserController
 from .memory_tool import MemoryTool
 from .screen_vision import ScreenVision
+from .weather import WeatherTool
+from .spotify import SpotifyTool
+from .reminder import ReminderTool
+from .power_control import PowerControl
+from .web_reader import WebReader
+from .file_organizer import FileOrganizer
 
 
 class ToolRegistry:
@@ -30,6 +36,13 @@ class ToolRegistry:
         self.browser_ctrl = BrowserController()
         self.memory = MemoryTool()
         self.vision = ScreenVision()
+        self.weather = WeatherTool()
+        self.spotify = SpotifyTool()
+        self.reminder = ReminderTool()
+        self.power = PowerControl()
+        self.power = PowerControl()
+        self.web_reader = WebReader()
+        self.file_organizer = FileOrganizer()
 
         self._tools = {
             "open_application": self._open_app,
@@ -64,7 +77,30 @@ class ToolRegistry:
             # Vision tools
             "read_screen": self._read_screen,
             "ocr_screen": self._ocr_screen,
+            "find_on_screen": self._find_on_screen,
+            "click_element": self._click_element,
+
+
+            # Git tools
+            "git_action": self._git_action,
+
+            # New feature tools
+            "check_weather": self._check_weather,
+            "spotify_control": self._spotify_control,
+            "set_reminder": self._set_reminder,
+            "list_reminders": self._list_reminders,
+            "power_action": self._power_action,
+            "read_webpage": self._read_webpage,
+            "create_note": self._create_note,
+            "read_notes": self._read_notes,
+            "read_notes": self._read_notes,
+            "describe_screen": self._describe_screen,
+            "organize_folder": self._organize_folder,
         }
+
+    def _git_action(self, **kwargs) -> ToolResult:
+        from .git_tool import GitTool
+        return GitTool().execute(**kwargs)
 
     def execute(self, tool_name: str, args: dict) -> ToolResult:
         """Execute a tool by name with given arguments."""
@@ -168,10 +204,78 @@ class ToolRegistry:
         return self.memory.store_fact(fact)
 
     def _read_screen(self, question: str = "What is on my screen?", **_) -> ToolResult:
-        return self.vision.analyze(question)
+        return ToolResult(success=True, message=self.vision.read_screen(question))
 
     def _ocr_screen(self, **_) -> ToolResult:
-        return self.vision.ocr_screen()
+        return ToolResult(success=True, message=self.vision.extract_screen_text())
+
+    def _find_on_screen(self, element: str, **_) -> ToolResult:
+        data = self.vision.find_on_screen(element)
+        if "error" in data:
+             return ToolResult(success=False, message=data["error"], data=data)
+        return ToolResult(success=True, message=f"Found {element}", data=data)
+
+    def _click_element(self, description: str, **_) -> ToolResult:
+        result = self.vision.click_element(description)
+        if "Could not find" in result or "Invalid coordinates" in result:
+             return ToolResult(success=False, message=result)
+        return ToolResult(success=True, message=result)
+
+
+
+    # ── New Feature Handlers ───────────────────────────────────
+
+    def _check_weather(self, city: str = "auto", **_) -> ToolResult:
+        return self.weather.execute(city)
+
+    def _spotify_control(self, action: str = "play_pause", query: str = "", **_) -> ToolResult:
+        return self.spotify.execute(action, query)
+
+    def _set_reminder(self, text: str = "Reminder", minutes: float = 0, time_str: str = "", **_) -> ToolResult:
+        return self.reminder.set_reminder(text, minutes, time_str)
+
+    def _list_reminders(self, **_) -> ToolResult:
+        return self.reminder.list_reminders()
+
+    def _power_action(self, action: str = "lock", **_) -> ToolResult:
+        return self.power.execute(action)
+
+    def _read_webpage(self, url: str = "", **_) -> ToolResult:
+        return self.web_reader.execute(url)
+
+    def _create_note(self, title: str = "note", content: str = "", **_) -> ToolResult:
+        import os
+        notes_dir = os.path.join(os.path.dirname(__file__), "..", "data", "notes")
+        os.makedirs(notes_dir, exist_ok=True)
+        safe_title = title.replace(" ", "_").replace("/", "_")
+        path = os.path.join(notes_dir, f"{safe_title}.txt")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(content + "\n")
+        return ToolResult(success=True, message=f"📝 Note '{title}' saved.")
+
+    def _read_notes(self, title: str = "", **_) -> ToolResult:
+        import os, glob
+        notes_dir = os.path.join(os.path.dirname(__file__), "..", "data", "notes")
+        if not os.path.exists(notes_dir):
+            return ToolResult(success=True, message="📋 No notes found.")
+        if title:
+            safe_title = title.replace(" ", "_").replace("/", "_")
+            path = os.path.join(notes_dir, f"{safe_title}.txt")
+            if os.path.exists(path):
+                content = open(path, "r", encoding="utf-8").read()
+                return ToolResult(success=True, message=f"📝 Note '{title}':\n{content}")
+            return ToolResult(success=False, message=f"Note '{title}' not found.")
+        files = glob.glob(os.path.join(notes_dir, "*.txt"))
+        if not files:
+            return ToolResult(success=True, message="📋 No notes found.")
+        names = [os.path.splitext(os.path.basename(f))[0].replace("_", " ") for f in files]
+        return ToolResult(success=True, message="📋 Your notes:\n" + "\n".join(f"  • {n}" for n in names))
+
+    def _describe_screen(self, question: str = "Describe what you see on screen", **_) -> ToolResult:
+        return ToolResult(success=True, message=self.vision.read_screen(question))
+
+    def _organize_folder(self, path: str, auto_confirm: bool = False, **_) -> ToolResult:
+        return self.file_organizer.organize(path, auto_confirm)
 
 
 __all__ = ["ToolRegistry", "ToolResult"]

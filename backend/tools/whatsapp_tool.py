@@ -7,18 +7,28 @@ import os
 import time
 import subprocess
 import webbrowser
-from .tool_result import ToolResult
+
+try:
+    # Prefer absolute import when used as a package
+    from tools.tool_result import ToolResult
+except ImportError:  # Fallback when running as a module
+    from .tool_result import ToolResult
 
 CDP_PORT = 9222
 
 
 def _get_chrome_exe():
-    """Find Chrome executable."""
+    """Find Chrome or Brave executable."""
     username = os.getenv("USERNAME", "")
     paths = [
+        # Chrome paths
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
         os.path.join("C:\\Users", username, "AppData", "Local", "Google", "Chrome", "Application", "chrome.exe"),
+        # Brave paths
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+        os.path.join("C:\\Users", username, "AppData", "Local", "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
     ]
     for p in paths:
         if os.path.exists(p):
@@ -88,22 +98,30 @@ class WhatsAppTool:
             return ToolResult(success=False,
                               message="Playwright not installed. Run: pip install playwright && playwright install chromium")
 
+        def log(msg: str) -> None:
+            print(f"[WhatsApp] {msg}")
+
         try:
+            log(f"Requested send_message(contact={contact!r}, message={message!r})")
             with sync_playwright() as p:
                 # Try to connect to existing Chrome CDP session first
                 browser = None
                 if _is_cdp_running():
                     try:
-                        browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{CDP_PORT}")
-                        print("[WhatsApp] Connected to existing Chrome via CDP")
-                    except Exception:
+                        log("Existing CDP endpoint detected, attempting connect...")
+                        browser = self._connect_cdp_with_retry(p, log)
+                        log("Connected to existing Chrome via CDP")
+                    except Exception as e:
+                        log(f"CDP connect to existing Chrome failed: {e}")
                         browser = None
 
                 if browser is None:
                     # Launch new Chrome with CDP and dedicated EONIX profile
+                    log("No existing CDP browser, launching Chrome with CDP...")
                     launched = _launch_chrome_with_cdp()
                     if not launched:
                         # Last resort: use Playwright's built-in Chromium with persistent profile
+                        log("Failed to launch Chrome with CDP, falling back to Playwright persistent context")
                         profile_dir = _get_eonix_profile_dir()
                         context = p.chromium.launch_persistent_context(
                             user_data_dir=profile_dir,
@@ -114,17 +132,14 @@ class WhatsAppTool:
                         page.goto("https://web.whatsapp.com", timeout=30000)
                         return self._do_whatsapp_actions(page, contact, message, wait_for_load, context=context)
 
-                    # Wait for Chrome to start
-                    time.sleep(3)
-                    for _ in range(10):
-                        if _is_cdp_running():
-                            break
-                        time.sleep(1)
-
                     try:
-                        browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{CDP_PORT}")
-                        print("[WhatsApp] Connected to Chrome via CDP")
+                        # Give Chrome a small grace period to open the port, then retry a few times
+                        log("Waiting briefly for Chrome CDP port to become available...")
+                        time.sleep(2)
+                        browser = self._connect_cdp_with_retry(p, log)
+                        log("Connected to newly launched Chrome via CDP")
                     except Exception as e:
+                        log(f"Could not connect to Chrome via CDP after retries: {e}")
                         return ToolResult(success=False, message=f"Could not connect to Chrome: {e}")
 
                 # Get or create WhatsApp Web page
@@ -139,14 +154,39 @@ class WhatsAppTool:
                         break
 
                 if wa_page is None:
+                    log("No existing WhatsApp tab, opening new tab...")
                     wa_page = context.new_page()
                     wa_page.goto("https://web.whatsapp.com", timeout=30000)
 
                 wa_page.bring_to_front()
+                log("WhatsApp tab brought to front, starting actions...")
                 return self._do_whatsapp_actions(wa_page, contact, message, wait_for_load)
 
         except Exception as e:
+            # Catch-all so the agent returns a clean ToolResult instead of crashing
+            print(f"[WhatsApp] Unexpected error in send_message: {e}")
             return ToolResult(success=False, message=f"WhatsApp error: {str(e)}")
+
+    @staticmethod
+    def _connect_cdp_with_retry(p, log, attempts: int = 5, delay: float = 2.0):
+        """
+        Try to connect to the Chrome CDP endpoint several times before giving up.
+        This makes failures much more visible and resilient.
+        """
+        url = f"http://127.0.0.1:{CDP_PORT}"
+        last_err: Exception | None = None
+        for i in range(1, attempts + 1):
+            try:
+                log(f"CDP connect attempt {i}/{attempts} to {url}")
+                return p.chromium.connect_over_cdp(url)
+            except Exception as e:  # pragma: no cover - best-effort logging
+                last_err = e
+                log(f"CDP attempt {i} failed: {e}")
+                if i < attempts:
+                    time.sleep(delay)
+        # If we exhausted attempts, raise the last error so caller can wrap in ToolResult
+        assert last_err is not None
+        raise last_err
 
     def _do_whatsapp_actions(self, page, contact: str, message: str,
                               wait_for_load: int = 30, context=None) -> ToolResult:
@@ -174,8 +214,11 @@ class WhatsAppTool:
                 """, timeout=wait_for_load * 1000)
                 log("WhatsApp loaded!")
             except PWTimeout:
-                if context:
-                    context.close()
+                if context is not None:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
                 return ToolResult(success=False,
                                   message=f"WhatsApp Web did not load in {wait_for_load}s. "
                                           "Please scan the QR code in the Chrome window, then try again.")
@@ -190,13 +233,11 @@ class WhatsAppTool:
                     const strategies = [
                         // data-testid
                         () => document.querySelector('[data-testid="search-input"]'),
-                        // aria-label containing "search"
+                        // "Search or start a new chat" text (common in newer WA Web)
                         () => {
-                            const els = document.querySelectorAll('[contenteditable="true"]');
+                            const els = document.querySelectorAll('div[contenteditable="true"]');
                             for (const el of els) {
-                                const label = (el.getAttribute('aria-label') || '').toLowerCase();
-                                const title = (el.getAttribute('title') || '').toLowerCase();
-                                if (label.includes('search') || title.includes('search')) return el;
+                                if (el.innerText.includes("Search") || el.getAttribute("aria-label")?.includes("Search")) return el;
                             }
                             return null;
                         },
@@ -206,15 +247,6 @@ class WhatsAppTool:
                         () => {
                             const side = document.querySelector('#side');
                             if (side) return side.querySelector('[contenteditable="true"]');
-                            return null;
-                        },
-                        // Any contenteditable that is visible
-                        () => {
-                            const els = document.querySelectorAll('[contenteditable="true"]');
-                            for (const el of els) {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0 && rect.top < 200) return el;
-                            }
                             return null;
                         },
                     ];
@@ -258,18 +290,18 @@ class WhatsAppTool:
                         () => document.querySelector('[data-testid="cell-frame-container"]'),
                         () => document.querySelector('[data-testid="chat-list-item"]'),
                         () => {
+                            // Find any div containing the contact name text in the side panel
+                            const side = document.querySelector('#side');
+                            if (!side) return null;
+                            const els = side.querySelectorAll('span, div');
+                            // We look for the contact name specifically if possible, but JS doesn't have the string easily here
+                            // So we just take the first result-like thing
+                            return side.querySelector('[role="listitem"]') || side.querySelector('[data-testid="list-item"]');
+                        },
+                        () => {
                             // Find list items in search results
                             const items = document.querySelectorAll('[role="listitem"]');
                             if (items.length > 0) return items[0];
-                            return null;
-                        },
-                        () => {
-                            // Find any clickable row in the search panel
-                            const rows = document.querySelectorAll('div[tabindex="-1"]');
-                            for (const row of rows) {
-                                const rect = row.getBoundingClientRect();
-                                if (rect.width > 100 && rect.height > 40 && rect.top > 60) return row;
-                            }
                             return null;
                         },
                     ];
@@ -387,8 +419,11 @@ class WhatsAppTool:
 
             if not msg_clicked:
                 log("Could not find message box")
-                if context:
-                    context.close()
+                if context is not None:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
                 return ToolResult(success=False,
                                   message=f"Opened {contact}'s chat but couldn't click the message input. "
                                           "The chat may not have fully loaded.")
@@ -403,9 +438,13 @@ class WhatsAppTool:
             page.keyboard.press("Enter")
             time.sleep(1)
             log("Message sent!")
+            time.sleep(5)  # Let user see the sent message before closing browser
 
-            if context:
-                context.close()
+            if context is not None:
+                try:
+                    context.close()
+                except Exception:
+                    pass
 
             return ToolResult(
                 success=True,
@@ -415,7 +454,7 @@ class WhatsAppTool:
 
         except Exception as e:
             log(f"Error: {e}")
-            if context:
+            if context is not None:
                 try:
                     context.close()
                 except Exception:

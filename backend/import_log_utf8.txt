@@ -1,0 +1,156 @@
+﻿python : Traceback 
+(most recent call 
+last):
+At line:1 char:1
++ python test_backend_i
+mports.py 2>&1 > 
+import_log.txt
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (Traceback (mo   
+ st recent call las    
+t)::String) [], Re    
+moteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+  File "C:\Users\haris\
+Downloads\final year 
+project\project da moun
+ey\backend\test_backend
+_imports.py", line 14, 
+in <module>
+    from tools import 
+ToolRegistry
+  File "C:\Users\haris\
+Downloads\final year 
+project\project da moun
+ey\backend\tools\__init
+__.py", line 14, in 
+<module>
+    from .memory_tool 
+import MemoryTool
+  File "C:\Users\haris\
+Downloads\final year 
+project\project da moun
+ey\backend\tools\memory
+_tool.py", line 4, in 
+<module>
+    from 
+memory.semantic import 
+SemanticMemory
+  File "C:\Users\haris\
+Downloads\final year 
+project\project da moun
+ey\backend\memory\__ini
+t__.py", line 4, in 
+<module>
+    from .db import 
+init_db, get_db, Task, 
+Preference, AppAlias, 
+Workflow
+  File "C:\Users\haris\
+Downloads\final year 
+project\project da moun
+ey\backend\memory\db.py
+", line 5, in <module>
+    from sqlalchemy 
+import create_engine, 
+Column, Integer, 
+String, Text, Float, 
+DateTime, Boolean, JSON
+  File "C:\Users\haris\
+AppData\Roaming\Python\
+Python314\site-packages
+\sqlalchemy\__init__.py
+", line 13, in <module>
+    from .engine 
+import 
+AdaptedConnection as 
+AdaptedConnection
+  File "C:\Users\haris\
+AppData\Roaming\Python\
+Python314\site-packages
+\sqlalchemy\engine\__in
+it__.py", line 18, in 
+<module>
+    from . import 
+events as events
+  File "C:\Users\haris\
+AppData\Roaming\Python\
+Python314\site-packages
+\sqlalchemy\engine\even
+ts.py", line 19, in 
+<module>
+    from .base import 
+Connection
+  File "C:\Users\haris\
+AppData\Roaming\Python\
+Python314\site-packages
+\sqlalchemy\engine\base
+.py", line 30, in 
+<module>
+    from .interfaces 
+import BindTyping
+  File "C:\Users\haris\
+AppData\Roaming\Python\
+Python314\site-packages
+\sqlalchemy\engine\inte
+rfaces.py", line 38, 
+in <module>
+    from 
+..sql.compiler import 
+Compiled as Compiled
+  File "C:\Users\haris\
+AppData\Roaming\Python\
+Python314\site-packages
+\sqlalchemy\sql\__init_
+_.py", line 14, in 
+<module>
+    from .compiler 
+import COLLECT_CARTESIA
+N_PRODUCTS as COLLECT_C
+ARTESIAN_PRODUCTS
+  File "C:\Users\haris\
+AppData\Roaming\Python\
+Python314\site-packages
+\sqlalchemy\sql\compile
+r.py", line 615, in 
+<module>
+    class Insertmanyval
+uesSentinelOpts(FastInt
+Flag):
+    ...<14 lines>...
+        RENDER_SELECT_C
+OL_CASTS = 64
+  File "C:\Users\haris\
+AppData\Roaming\Python\
+Python314\site-packages
+\sqlalchemy\util\langhe
+lpers.py", line 1663, 
+in __init__
+    sym = symbol(k, 
+canonical=v)
+  File "C:\Users\haris\
+AppData\Roaming\Python\
+Python314\site-packages
+\sqlalchemy\util\langhe
+lpers.py", line 1635, 
+in __new__
+    raise TypeError(
+    ...<2 lines>...
+    )
+TypeError: Can't 
+replace canonical 
+symbol for 
+'__firstlineno__' with 
+new int value 615
+Current Path: ['C:\\Users\\haris\\Downloads\\final year project\\project da mouney\\backend', 'C:\\Python314\\python314.zip', 'C:\\Python314\\DLLs', 'C:\\Python314\\Lib', 'C:\\Python314', 'C:\\Users\\haris\\AppData\\Roaming\\Python\\Python314\\site-packages', 'C:\\Users\\haris\\AppData\\Roaming\\Python\\Python314\\site-packages\\win32', 'C:\\Users\\haris\\AppData\\Roaming\\Python\\Python314\\site-packages\\win32\\lib', 'C:\\Users\\haris\\AppData\\Roaming\\Python\\Python314\\site-packages\\Pythonwin', 'C:\\Python314\\Lib\\site-packages', 'C:\\Users\\haris\\Downloads\\final year project\\project da mouney\\backend']
+OllamaBrain OK
+GeminiBrain OK
+
+IMPORT FAILED: Can't replace canonical symbol for '__firstlineno__' with new int value 615

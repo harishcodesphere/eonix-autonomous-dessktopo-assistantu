@@ -1,0 +1,10 @@
+[
+  {
+    "id": "Daily Briefing_1771554600.0",
+    "name": "Daily Briefing",
+    "command": "run_briefing",
+    "run_at": "2026-02-20T08:00:00",
+    "repeat": "daily",
+    "completed": false
+  }
+]
