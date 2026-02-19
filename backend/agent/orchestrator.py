@@ -19,7 +19,7 @@ from agent.router import route, parse_brain_prefix
 from memory.db import get_db, init_db
 from memory.task_store import create_task, update_task, get_recent_tasks
 from memory.preference_store import get_preference, set_preference
-from memory.semantic import SemanticMemory
+from memory.semantic import semantic_memory
 from agent.personality import PersonalityEngine
 from ai.chatbot import chatbot as chatbot_engine
 
@@ -41,7 +41,7 @@ class AgentOrchestrator:
         self.ollama = OllamaBrain()
         self.gemini = GeminiBrain()
         self.tools = ToolRegistry()
-        self.memory = SemanticMemory()
+        self.memory = semantic_memory
         self.personality = PersonalityEngine()
         self._default_brain = "auto"
 
@@ -201,6 +201,43 @@ class AgentOrchestrator:
                 "response": f"Searching YouTube for '{query}'..."
             }
 
+        # ── App Control (Open/Close) ───────────────────────────────
+        # Intercept ONLY simple commands. Let LLM handle complex ones ("open notepad and type hi")
+        # "open notepad", "launch calculator", "start chrome"
+        
+        # Check for multi-step indicators
+        if " and " in t or " then " in t or "," in t:
+            return None
+
+        # Open
+        open_m = re.search(r"^(?:open|launch|start|run)\s+(.+?)$", t)
+        if open_m:
+            app = open_m.group(1).strip()
+            # Filter out some common non-apps if needed, but usually safe
+            if app not in ["it", "that", "the", "a", "an"]:
+                return {
+                    "intent": f"Open application: {app}",
+                    "complexity": 0.1,
+                    "steps": [{"tool": "open_application",
+                               "args": {"app_name": app},
+                               "description": f"Launch {app}"}],
+                    "response": f"Opening {app}..."
+                }
+
+        # Close
+        close_m = re.search(r"^(?:close|quit|exit|terminate|kill)\s+(.+?)$", t)
+        if close_m:
+            app = close_m.group(1).strip()
+            if app not in ["it", "that", "me"]:
+                 return {
+                    "intent": f"Close application: {app}",
+                    "complexity": 0.1,
+                    "steps": [{"tool": "close_application",
+                               "args": {"app_name": app},
+                               "description": f"Close {app}"}],
+                    "response": f"Closing {app}..."
+                }
+
         return None  # No intercept match
 
     def _get_memory_context(self, text: str) -> str:
@@ -218,7 +255,7 @@ class AgentOrchestrator:
             print(f"Memory Error: {e}")
             return ""
 
-    async def process(self, user_input: str, conversation_history: List[Dict] = None) -> AgentResponse:
+    async def process(self, user_input: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> AgentResponse:
         """Process a user command through the full pipeline."""
         start_time = time.time()
         conversation_history = conversation_history or []
@@ -256,11 +293,14 @@ class AgentOrchestrator:
         actions = []
         reply = ""
 
+        plan: Dict[str, Any] = {}
         try:
             # ── Keyword interceptor (bypasses AI for known command patterns) ──
-            plan = self._intercept_known_commands(clean_input)
+            intercepted = self._intercept_known_commands(clean_input)
             
-            if plan is None:
+            if intercepted is not None:
+                plan = intercepted
+            else:
                 # ── MEMORY INJECTION ──
                 memory_context = self._get_memory_context(clean_input)
                 augmented_input = memory_context + clean_input
@@ -276,7 +316,7 @@ class AgentOrchestrator:
 
             # ── CHATBOT ROUTING ──
             # If no tool steps → it's a general question → route to chatbot
-            if not steps and plan is not None:
+            if not steps:
                 try:
                     chat_result = await chatbot_engine.chat(
                         clean_input, conversation_history
@@ -332,7 +372,7 @@ class AgentOrchestrator:
 
                 # If a critical step fails, note it
                 if not result.success:
-                    reply = f"I encountered an issue: {result.message}. " + reply
+                    reply = f"I encountered an issue: {result.message}. " + str(reply)
 
         except Exception as e:
             reply = f"I ran into an error processing your request: {str(e)}"
@@ -344,8 +384,8 @@ class AgentOrchestrator:
 
         update_task(db, task.id,
                    brain_used=brain,
-                   intent=plan.get("intent", "") if 'plan' in dir() else "",
-                   plan=plan.get("steps", []) if 'plan' in dir() else [],
+                   intent=plan.get("intent", ""),
+                   plan=plan.get("steps", []),
                    actions=actions,
                    result=reply,
                    success=success,
@@ -361,7 +401,7 @@ class AgentOrchestrator:
             success=success
         )
 
-    async def stream_process(self, user_input: str, conversation_history: List[Dict] = None) -> AsyncGenerator[Dict, None]:
+    async def stream_process(self, user_input: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream the processing with real-time updates."""
         start_time = time.time()
 
@@ -487,7 +527,7 @@ class AgentOrchestrator:
         """Handle built-in slash commands."""
         parts = cmd.split()
         command = parts[0].lower()
-        args = parts[1:] if len(parts) > 1 else []
+        args: List[str] = list(parts[1:]) if len(parts) > 1 else []  # type: ignore[index]
 
         if command == "/help":
             reply = """**EONIX Slash Commands:**
@@ -505,17 +545,20 @@ class AgentOrchestrator:
             from tools.system_info import SystemInfo
             si = SystemInfo()
             data = si.get_all()
-            cpu = data['cpu']
-            mem = data['memory']
-            disk = data['disk']
+            cpu = data.get('cpu', {})
+            mem = data.get('memory', {})
+            disk = data.get('disk', {})
             battery = data.get('battery')
             ollama_status = "🟢 Online" if self.ollama.is_available() else "🔴 Offline"
             gemini_status = "🟢 Online" if self.gemini.is_available() else "🔴 Offline"
+            battery_str = "Desktop (no battery)"
+            if battery and isinstance(battery, dict):
+                battery_str = f"{battery.get('percent', '?')}% ({'charging' if battery.get('plugged') else 'on battery'})"
             reply = f"""**System Status:**
-• CPU: {cpu['percent']}% ({cpu['cores']} cores)
-• RAM: {mem['used_gb']}GB / {mem['total_gb']}GB ({mem['percent']}%)
-• Disk: {disk['used_gb']}GB / {disk['total_gb']}GB ({disk['percent']}%)
-• Battery: {f"{battery['percent']}% ({'charging' if battery['plugged'] else 'on battery'})" if battery else 'Desktop (no battery)'}
+• CPU: {cpu.get('percent', '?')}% ({cpu.get('cores', '?')} cores)
+• RAM: {mem.get('used_gb', '?')}GB / {mem.get('total_gb', '?')}GB ({mem.get('percent', '?')}%)
+• Disk: {disk.get('used_gb', '?')}GB / {disk.get('total_gb', '?')}GB ({disk.get('percent', '?')}%)
+• Battery: {battery_str}
 
 **AI Brains:**
 • Ollama (Local): {ollama_status}
@@ -578,6 +621,58 @@ class AgentOrchestrator:
             reply = f"Unknown command: {cmd}\nType `/help` for available commands."
 
         return AgentResponse(reply=reply, brain="system", success=True)
+
+    async def handle_voice_command(self, text: str):
+        """Process a command received via voice."""
+        print(f"🎤 Voice Command: {text}")
+        
+        # 1. Direct interception (fast path)
+        intercept = self._intercept_known_commands(text)
+        if intercept:
+            print(f"⚡ Fast-tracked: {intercept['intent']}")
+            # Execute intercept plan
+            from tools.voice_engine import voice_engine
+            
+            # Speak response first
+            if intercept.get("response"):
+                 await voice_engine.speak(intercept["response"])
+
+            # Execute steps
+            for step in intercept.get("steps", []):
+                tool_name = step["tool"]
+                args = step.get("args", {})
+                await self.tools.execute(tool_name, **args)
+            return
+
+        # 2. AI Processing
+        # Decide brain based on complexity/preference
+        # For voice, we usually want speed -> Ollama
+        brain = self.ollama
+        
+        # Plan
+        try:
+            plan = await brain.plan(text)
+            
+            # Speak response
+            response_text = plan.get("response", "")
+            if response_text:
+                from tools.voice_engine import voice_engine
+                await voice_engine.speak(response_text)
+                
+            # Execute steps
+            for step in plan.get("steps", []):
+                tool_name = step["tool"]
+                args = step.get("args", {})
+                try:
+                    await self.tools.execute(tool_name, **args)
+                except Exception as e:
+                    print(f"❌ Tool Error: {e}")
+                    from tools.voice_engine import voice_engine
+                    await voice_engine.speak(f"I encountered an error: {e}")
+        except Exception as e:
+            print(f"Plan Error: {e}")
+            from tools.voice_engine import voice_engine
+            await voice_engine.speak("I'm sorry, I couldn't process that.")
 
     def set_default_brain(self, brain: str):
         self._default_brain = brain

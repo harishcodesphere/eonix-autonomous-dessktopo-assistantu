@@ -22,10 +22,17 @@ from api.routes_memory import router as memory_router
 from api.routes_ws import router as ws_router
 from brains.ollama_brain import OllamaBrain
 from brains.gemini_brain import GeminiBrain
+from brains.claude_brain import ClaudeBrain
 from agent.monitor import system_monitor
 from api.routes_ws import push_alert
 from agent.scheduler import scheduler
 from agent.plugin_loader import plugin_loader
+from tools.voice import voice_system
+from agent.orchestrator import AgentOrchestrator
+
+# Initialize global orchestrator for voice callback
+# (This avoids circular import issues by importing INSIDE callback or using global)
+orchestrator = None 
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -54,6 +61,7 @@ async def lifespan(app: FastAPI):
     # Check AI brains
     ollama = OllamaBrain()
     gemini = GeminiBrain()
+    claude = ClaudeBrain()
 
     if ollama.is_available():
         print("✓ Ollama (Local AI) — ONLINE")
@@ -64,6 +72,26 @@ async def lifespan(app: FastAPI):
         print("✓ Gemini — ONLINE")
     else:
         print("⚠ Gemini — API key not set or unavailable")
+
+    if claude.is_available():
+        print("✓ Claude — ONLINE")
+    else:
+        print("⚠ Claude — API key not set or unavailable")
+
+    # Initialize Orchestrator
+    global orchestrator
+    orchestrator = AgentOrchestrator()
+    
+    # Start Voice System
+    from api.routes_ws import manager
+
+    async def broadcast_voice_status(status):
+        await manager.broadcast({"type": "voice_status", "status": status})
+
+    voice_system.set_callback(orchestrator.handle_voice_command)
+    voice_system.set_status_callback(broadcast_voice_status)
+    voice_system.start()
+    print("✓ Voice System — READY (Listening)")
 
     # Start proactive monitor
     system_monitor.on_alert(push_alert)
@@ -84,6 +112,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Stop background tasks on shutdown
+    voice_system.stop()
     system_monitor.stop()
     monitor_task.cancel()
     scheduler.stop()
@@ -165,9 +194,9 @@ async def serve_static(path: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
-        host="127.0.0.1",
-        port=8000,
+        "main:app", 
+        host="127.0.0.1", 
+        port=8000, 
         reload=True,
         log_level="warning"
     )

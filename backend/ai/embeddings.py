@@ -4,24 +4,31 @@ Manages semantic embeddings via ChromaDB for memory and search.
 """
 import uuid
 from datetime import datetime
-from loguru import logger
+from typing import Any, Dict, List, Optional
 
 try:
-    import chromadb
+    from loguru import logger  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover
+    import logging as _logging
+    logger = _logging.getLogger(__name__)  # type: ignore[assignment]
+
+try:
+    import chromadb  # type: ignore[import-untyped]
     CHROMADB_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover
     CHROMADB_AVAILABLE = False
     logger.warning("ChromaDB not installed. Vector search will be disabled.")
 
 
 class EmbeddingManager:
-    def __init__(self, persist_directory: str = "./data/chroma"):
+    def __init__(self, persist_directory: str = "./data/chroma") -> None:
         self.persist_dir = persist_directory
-        self.collection = None
+        # Typed as Any so Pyright doesn't infer NoneType for every attribute access
+        self.collection: Optional[Any] = None
 
         if CHROMADB_AVAILABLE:
             try:
-                self.client = chromadb.PersistentClient(path=self.persist_dir)
+                self.client: Any = chromadb.PersistentClient(path=self.persist_dir)
                 self.collection = self.client.get_or_create_collection(
                     name="eonix_memory",
                     metadata={"hnsw:space": "cosine"},
@@ -31,9 +38,9 @@ class EmbeddingManager:
                 logger.error(f"ChromaDB initialization failed: {e}")
                 self.collection = None
 
-    async def store(self, text: str, metadata: dict = None) -> str:
+    async def store(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Store a text with its embedding in the vector DB."""
-        if not self.collection:
+        if self.collection is None:
             return ""
 
         doc_id = str(uuid.uuid4())
@@ -51,17 +58,17 @@ class EmbeddingManager:
             logger.error(f"Failed to store embedding: {e}")
             return ""
 
-    async def search(self, query: str, n_results: int = 5) -> list[dict]:
+    async def search(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
         """Search for similar documents."""
-        if not self.collection:
+        if self.collection is None:
             return []
 
         try:
-            results = self.collection.query(
+            results: Dict[str, Any] = self.collection.query(
                 query_texts=[query],
                 n_results=n_results,
             )
-            items = []
+            items: List[Dict[str, Any]] = []
             for i, doc in enumerate(results.get("documents", [[]])[0]):
                 items.append({
                     "document": doc,
@@ -75,7 +82,7 @@ class EmbeddingManager:
 
     async def delete(self, doc_id: str) -> bool:
         """Delete a document by ID."""
-        if not self.collection:
+        if self.collection is None:
             return False
         try:
             self.collection.delete(ids=[doc_id])

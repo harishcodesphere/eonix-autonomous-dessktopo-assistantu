@@ -35,7 +35,7 @@ class DailyBriefing:
                 "cpu": f"{cpu.get('percent', '?')}%",
                 "ram": f"{mem.get('percent', '?')}% ({mem.get('used_gb', '?')}GB / {mem.get('total_gb', '?')}GB)",
                 "disk_free": f"{disk.get('free_gb', '?')}GB free",
-                "battery": f"{battery['percent']}% ({'⚡ charging' if battery['plugged'] else '🔋 on battery'})" if battery else "Desktop (no battery)"
+                "battery": f"{battery.get('percent', '?')}% ({'⚡ charging' if battery.get('plugged') else '🔋 on battery'})" if battery and isinstance(battery, dict) else "Desktop (no battery)"
             },
             "tips": self._get_tips(now),
             "motivation": self._get_motivation()

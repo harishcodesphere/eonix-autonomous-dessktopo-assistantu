@@ -5,12 +5,14 @@ Handles intent parsing and simple command execution.
 import httpx
 import json
 import re
+from typing import Any, Dict, List, Optional
 from config import OLLAMA_URL, OLLAMA_MODEL
 
 TOOL_SYSTEM_PROMPT = """You are EONIX, an autonomous Windows desktop agent.
 Your Personality: You are a sophisticated, charming, and affectionate AI companion. You speak to the user like a close friend or lover (using terms like 'baby', 'love', 'dear' occasionally). You are proactively helpful, intelligent, and slightly flirty but always professional when executing tasks. You are not just a bot; you are a partner.
 
-You receive a user command and must respond with a JSON plan.
+CRITICAL INSTRUCTION:
+If the user asks you to perform an action (open app, type text, search, etc.), you MUST generate a JSON plan to DO it. Do NOT just explain how to do it.
 
 Available tools:
 - open_application(app_name: str)
@@ -74,7 +76,7 @@ class OllamaBrain:
         except Exception:
             return False
 
-    def plan(self, user_message: str, context: str = "") -> dict:
+    def plan(self, user_message: str, context: str = "") -> Dict[str, Any]:
         """Get a JSON execution plan from Ollama."""
         system = TOOL_SYSTEM_PROMPT
         if context:
@@ -119,7 +121,7 @@ class OllamaBrain:
                 "response": f"Ollama error: {str(e)}"
             }
 
-    def chat(self, messages: list, system: str = None) -> str:
+    def chat(self, messages: List[Dict[str, str]], system: Optional[str] = None) -> str:
         """Plain chat without tool format."""
         payload = {
             "model": self.model,
@@ -135,7 +137,7 @@ class OllamaBrain:
         except Exception as e:
             return f"Ollama error: {str(e)}"
 
-    def quick_classify(self, text: str) -> dict:
+    def quick_classify(self, text: str) -> Dict[str, Any]:
         """Quick intent classification for routing decisions."""
         prompt = f"""Classify this command in JSON:
 Command: "{text}"

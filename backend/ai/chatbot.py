@@ -5,8 +5,12 @@ and knowledge-augmented responses across every domain.
 """
 import json
 import time
-from typing import List, Dict, Optional
-from loguru import logger
+from typing import List, Dict, Optional, Any
+try:
+    from loguru import logger  # type: ignore[import-untyped]
+except ImportError:
+    import logging as _logging
+    logger = _logging.getLogger(__name__)  # type: ignore[assignment]
 
 from ai.ollama_client import OllamaClient
 from ai.prompts import get_prompt
@@ -25,7 +29,8 @@ class ConversationMemory:
         self._history.append({"role": role, "content": content})
         # Keep within sliding window
         if len(self._history) > self.max_turns * 2:
-            self._history = self._history[-(self.max_turns * 2):]
+            keep = self.max_turns * 2
+            self._history = list(self._history)[len(self._history) - keep:]  # type: ignore[index]
 
     def get_messages(self) -> List[Dict[str, str]]:
         """Return conversation history in chat format."""
@@ -35,7 +40,7 @@ class ConversationMemory:
         """Get a brief summary of recent conversation for context injection."""
         if not self._history:
             return ""
-        recent = self._history[-6:]  # Last 3 exchanges
+        recent = list(self._history)[max(0, len(self._history) - 6):]  # type: ignore[index]  # Last 3 exchanges
         lines = []
         for msg in recent:
             role = "User" if msg["role"] == "user" else "Eonix"
@@ -62,7 +67,7 @@ class Chatbot:
         self.personality = PersonalityEngine()
         self.memory = ConversationMemory(max_turns=20)
         self.system_prompt = get_prompt("chatbot")
-        self._gemini = None
+        self._gemini: Optional[Any] = None
 
     def _get_gemini(self):
         """Lazy-load Gemini brain as fallback."""
@@ -79,8 +84,8 @@ class Chatbot:
     async def chat(
         self,
         user_message: str,
-        conversation_history: Optional[List[Dict]] = None
-    ) -> Dict:
+        conversation_history: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
         """
         Process a chat message and return a rich conversational response.
         
@@ -143,7 +148,7 @@ class Chatbot:
     def _build_messages(
         self,
         user_message: str,
-        conversation_history: Optional[List[Dict]],
+        conversation_history: Optional[List[Dict[str, Any]]],
         mood: str,
         tone: str,
         time_ctx: str
@@ -157,14 +162,16 @@ class Chatbot:
         # Use provided conversation history OR internal memory
         if conversation_history and len(conversation_history) > 0:
             # Use the frontend-provided history (last 20 messages)
-            for msg in conversation_history[-20:]:
+            hist_list = list(conversation_history)
+            for msg in hist_list[max(0, len(hist_list) - 20):]:  # type: ignore[index]
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
                 if role in ("user", "assistant") and content:
                     messages.append({"role": role, "content": content})
         else:
             # Use internal memory
-            for msg in self.memory.get_messages()[:-1]:  # Exclude current message (added above)
+            all_msgs = list(self.memory.get_messages())
+            for msg in all_msgs[:max(0, len(all_msgs) - 1)]:  # type: ignore[index]  # Exclude current
                 messages.append(msg)
 
         # Add the current user message
@@ -176,9 +183,10 @@ class Chatbot:
         """Try to get a response from Ollama."""
         try:
             # Use chat endpoint for multi-turn conversation
+            msg_list = list(messages)
             response = await self.ollama.chat(
-                messages=messages[1:],  # Exclude system (passed separately)
-                system_prompt=messages[0]["content"]
+                messages=msg_list[1:] if len(msg_list) > 1 else [],  # type: ignore[index]  # Exclude system
+                system_prompt=msg_list[0]["content"] if msg_list else ""  # type: ignore[index]
             )
             return response
         except Exception as e:
@@ -203,7 +211,8 @@ class Chatbot:
         if reply.startswith("```"):
             lines = reply.split("\n")
             if len(lines) > 2:
-                reply = "\n".join(lines[1:-1])
+                line_list = list(lines)
+                reply = "\n".join(line_list[1:max(1, len(line_list) - 1)])  # type: ignore[index]
 
         # Try to extract just the response if LLM returned JSON
         try:
@@ -256,7 +265,7 @@ class Chatbot:
         """Clear conversation history for a fresh start."""
         self.memory.clear()
 
-    def get_conversation_stats(self) -> Dict:
+    def get_conversation_stats(self) -> Dict[str, Any]:
         """Get conversation statistics."""
         return {
             "total_turns": self.memory.turn_count,

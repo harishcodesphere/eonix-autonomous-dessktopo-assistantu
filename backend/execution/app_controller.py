@@ -4,6 +4,7 @@ Launch, close, and manage desktop applications.
 """
 import subprocess
 import platform
+from typing import Dict, List, Optional
 from loguru import logger
 
 try:
@@ -32,7 +33,7 @@ class AppController:
         "slack": "slack",
     }
 
-    async def launch(self, app_name: str, args: list[str] = None) -> dict:
+    async def launch(self, app_name: str, args: Optional[List[str]] = None) -> Dict[str, str]:
         """Launch an application."""
         executable = self.APP_MAP.get(app_name.lower(), app_name)
         try:
@@ -47,7 +48,7 @@ class AppController:
             logger.error(f"Failed to launch {app_name}: {e}")
             return {"status": "error", "message": str(e)}
 
-    async def close(self, app_name: str) -> dict:
+    async def close(self, app_name: str) -> Dict[str, str]:
         """Close an application by name."""
         if not PYGETWINDOW_AVAILABLE:
             return {"status": "error", "message": "pygetwindow not available"}
@@ -63,7 +64,7 @@ class AppController:
             logger.error(f"Failed to close {app_name}: {e}")
             return {"status": "error", "message": str(e)}
 
-    async def focus(self, app_name: str) -> dict:
+    async def focus(self, app_name: str) -> Dict[str, str]:
         """Bring an application to focus."""
         if not PYGETWINDOW_AVAILABLE:
             return {"status": "error", "message": "pygetwindow not available"}
@@ -76,7 +77,7 @@ class AppController:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    async def list_running(self) -> list[dict]:
+    async def list_running(self) -> List[Dict[str, object]]:
         """List all open windows."""
         if not PYGETWINDOW_AVAILABLE:
             return []

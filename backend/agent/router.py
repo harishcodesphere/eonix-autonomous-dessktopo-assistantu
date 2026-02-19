@@ -2,6 +2,7 @@
 EONIX Router — Decides which AI brain to use for each request.
 """
 import re
+from typing import Optional, Tuple
 
 COMPLEX_KEYWORDS = [
     "prepare", "organize", "optimize", "set up", "setup",
@@ -30,7 +31,7 @@ SIMPLE_PATTERNS = [
 ]
 
 
-def route(user_input: str, forced: str = None, ollama_available: bool = True,
+def route(user_input: str, forced: Optional[str] = None, ollama_available: bool = True,
           gemini_available: bool = True) -> str:
     """
     Decide which brain to use.
@@ -76,7 +77,7 @@ def route(user_input: str, forced: str = None, ollama_available: bool = True,
     return "local"
 
 
-def parse_brain_prefix(user_input: str) -> tuple[str, str]:
+def parse_brain_prefix(user_input: str) -> Tuple[Optional[str], str]:
     """
     Parse @local, @gemini, @claude prefix from input.
     Returns: (forced_brain, clean_input)
@@ -89,5 +90,5 @@ def parse_brain_prefix(user_input: str) -> tuple[str, str]:
     }
     for prefix, brain in prefixes.items():
         if user_input.lower().startswith(prefix):
-            return brain, user_input[len(prefix):].strip()
+            return brain, user_input[len(prefix):].strip()  # type: ignore[index]
     return None, user_input

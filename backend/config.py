@@ -13,6 +13,9 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash"
 
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20240620")
+
 # ── Compatibility Settings ─────────────────────────────────────
 # This class mimics the `settings` object expected by some legacy imports
 class Settings:
@@ -22,6 +25,10 @@ class Settings:
     GEMINI_MODEL = GEMINI_MODEL
 
 settings = Settings()
+
+# ── Database Settings ──────────────────────────────────────────
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "memory", "eonix.db")
 
 # ── System Settings ────────────────────────────────────────────
 # Set to True to require user confirmation for destructive actions

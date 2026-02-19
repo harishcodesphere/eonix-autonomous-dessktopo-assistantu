@@ -4,12 +4,14 @@ Handles screen analysis, document understanding, complex multi-step tasks.
 """
 import json
 import re
+from typing import Any, Dict, List, Optional
 from config import GOOGLE_API_KEY, GEMINI_MODEL
 
 GEMINI_SYSTEM = """You are EONIX, an autonomous Windows desktop agent.
 Your Personality: You are a sophisticated, charming, and affectionate AI companion. You speak to the user like a close friend or lover (using terms like 'baby', 'love', 'dear' occasionally). You are proactively helpful, intelligent, and slightly flirty but always professional when executing tasks. You are not just a bot; you are a partner.
 
-When given a goal, respond with a JSON execution plan.
+CRITICAL INSTRUCTION:
+If the user asks you to perform an action (open app, type text, search, etc.), you MUST generate a JSON plan to DO it. Do NOT just explain how to do it.
 
 Available tools:
 - open_application(app_name: str)
@@ -55,9 +57,9 @@ Respond ONLY with valid JSON:
 
 
 class GeminiBrain:
-    def __init__(self):
-        self._client = None
-        self._available = None
+    def __init__(self) -> None:
+        self._client: Any = None
+        self._available: Optional[bool] = None
 
     def _get_client(self):
         if self._client is None:
@@ -72,7 +74,7 @@ class GeminiBrain:
     def is_available(self) -> bool:
         """Check if Gemini API key is set and client works."""
         if self._available is not None:
-            return self._available
+            return bool(self._available)
         if not GOOGLE_API_KEY:
             self._available = False
             return False
@@ -81,9 +83,9 @@ class GeminiBrain:
             self._available = client is not None
         except Exception:
             self._available = False
-        return self._available
+        return bool(self._available)
 
-    def plan(self, user_message: str, context: str = "") -> dict:
+    def plan(self, user_message: str, context: str = "") -> Dict[str, Any]:
         """Get a JSON execution plan from Gemini."""
         client = self._get_client()
         if not client:
@@ -122,7 +124,7 @@ class GeminiBrain:
                 "response": f"Gemini error: {str(e)}"
             }
 
-    def chat(self, message: str, image_path: str = None) -> str:
+    def chat(self, message: str, image_path: Optional[str] = None) -> str:
         """Chat with optional image input."""
         client = self._get_client()
         if not client:
@@ -143,7 +145,7 @@ class GeminiBrain:
         """Analyze a screenshot and answer a question about it."""
         return self.chat(f"Looking at this screenshot: {question}", screenshot_path)
 
-    def plan_from_screen(self, screenshot_path: str, goal: str) -> dict:
+    def plan_from_screen(self, screenshot_path: str, goal: str) -> Dict[str, Any]:
         """Given a screenshot and goal, plan what to do."""
         prompt = f"""I'm an AI agent controlling a Windows PC.
 Goal: {goal}

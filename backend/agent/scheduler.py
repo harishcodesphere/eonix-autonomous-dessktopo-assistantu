@@ -5,12 +5,12 @@ import asyncio
 import json
 import os
 from datetime import datetime, timedelta
-from typing import Callable, Optional
+from typing import Callable, Optional, List, Dict, Any
 
 SCHEDULE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "schedules.json")
 
 class ScheduledTask:
-    def __init__(self, name: str, command: str, run_at: datetime, repeat: str = None):
+    def __init__(self, name: str, command: str, run_at: datetime, repeat: Optional[str] = None):
         self.name = name
         self.command = command
         self.run_at = run_at
@@ -18,7 +18,7 @@ class ScheduledTask:
         self.completed = False
         self.id = f"{name}_{run_at.timestamp()}"
 
-    def to_dict(self):
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -29,7 +29,7 @@ class ScheduledTask:
         }
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data: Dict[str, Any]) -> 'ScheduledTask':
         task = cls(
             name=data["name"],
             command=data["command"],
@@ -45,7 +45,7 @@ class TaskScheduler:
     """Manage scheduled tasks."""
 
     def __init__(self):
-        self.tasks: list[ScheduledTask] = []
+        self.tasks: List[ScheduledTask] = []
         self.running = False
         self.on_execute: Optional[Callable] = None
         self._load()
@@ -55,9 +55,12 @@ class TaskScheduler:
         try:
             if os.path.exists(SCHEDULE_FILE):
                 with open(SCHEDULE_FILE, 'r') as f:
-                    data = json.load(f)
-                    self.tasks = [ScheduledTask.from_dict(t) for t in data]
-        except Exception:
+                    content = f.read().strip()
+                    if content:
+                        data = json.loads(content)
+                        self.tasks = [ScheduledTask.from_dict(t) for t in data]
+        except Exception as e:
+            print(f"⚠️ Scheduler load error: {e}")
             self.tasks = []
 
     def _save(self):
@@ -67,9 +70,9 @@ class TaskScheduler:
             with open(SCHEDULE_FILE, 'w') as f:
                 json.dump([t.to_dict() for t in self.tasks], f, indent=2)
         except Exception as e:
-            print(f"Scheduler save error: {e}")
+            print(f"❌ Scheduler save error: {e}")
 
-    def add(self, name: str, command: str, run_at: datetime, repeat: str = None) -> ScheduledTask:
+    def add(self, name: str, command: str, run_at: datetime, repeat: Optional[str] = None) -> ScheduledTask:
         """Add a scheduled task."""
         task = ScheduledTask(name, command, run_at, repeat)
         self.tasks.append(task)
@@ -85,7 +88,7 @@ class TaskScheduler:
             return True
         return False
 
-    def list_tasks(self) -> list:
+    def list_tasks(self) -> List[Dict[str, Any]]:
         """List all scheduled tasks."""
         return [t.to_dict() for t in self.tasks if not t.completed]
 
@@ -94,34 +97,40 @@ class TaskScheduler:
         self.running = True
         print("⏰ Task Scheduler: ONLINE")
         while self.running:
-            now = datetime.now()
-            for task in self.tasks:
-                if task.completed:
-                    continue
-                if now >= task.run_at:
-                    # Execute the task
-                    print(f"⏰ Executing scheduled task: {task.name}")
-                    if self.on_execute:
-                        try:
-                            if asyncio.iscoroutinefunction(self.on_execute):
-                                await self.on_execute(task.command)
-                            else:
-                                self.on_execute(task.command)
-                        except Exception as e:
-                            print(f"Scheduled task error: {e}")
+            try:
+                now = datetime.now()
+                # Create a copy to iterate safely
+                for task in list(self.tasks):
+                    if task.completed:
+                        continue
+                        
+                    if now >= task.run_at:
+                        # Execute the task
+                        print(f"⏰ Executing scheduled task: {task.name}")
+                        if self.on_execute:
+                            try:
+                                callback = self.on_execute
+                                if asyncio.iscoroutinefunction(callback):
+                                    await callback(task.command)
+                                else:
+                                    callback(task.command)
+                            except Exception as e:
+                                print(f"❌ Scheduled task execution error: {e}")
 
-                    # Handle repeat
-                    if task.repeat == "daily":
-                        task.run_at += timedelta(days=1)
-                    elif task.repeat == "hourly":
-                        task.run_at += timedelta(hours=1)
-                    elif task.repeat == "weekly":
-                        task.run_at += timedelta(weeks=1)
-                    else:
-                        task.completed = True
+                        # Handle repeat
+                        if task.repeat == "daily":
+                            task.run_at += timedelta(days=1)
+                        elif task.repeat == "hourly":
+                            task.run_at += timedelta(hours=1)
+                        elif task.repeat == "weekly":
+                            task.run_at += timedelta(weeks=1)
+                        else:
+                            task.completed = True
 
-                    self._save()
-
+                        self._save()
+            except Exception as e:
+                print(f"❌ Scheduler loop error: {e}")
+                
             await asyncio.sleep(30)  # Check every 30 seconds
 
     def stop(self):

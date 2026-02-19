@@ -4,18 +4,19 @@ Communicates with the local Ollama LLM server for AI processing.
 """
 import httpx
 from loguru import logger
+from typing import Any, Dict, List, Optional
 from config import settings
 
 
 class OllamaClient:
     """Client for the local Ollama LLM service."""
 
-    def __init__(self, host: str = None, model: str = None):
-        self.host = host or settings.OLLAMA_HOST
-        self.model = model or settings.OLLAMA_MODEL
-        self._available = None
+    def __init__(self, host: Optional[str] = None, model: Optional[str] = None):
+        self.host: str = host or settings.OLLAMA_HOST
+        self.model: str = model or settings.OLLAMA_MODEL
+        self._available: Optional[bool] = None
 
-    async def generate_response(self, prompt: str, system_prompt: str = None, stream: bool = False) -> str:
+    async def generate_response(self, prompt: str, system_prompt: Optional[str] = None, stream: bool = False) -> str:
         """
         Generate a response from Ollama.
         Supports optional system prompt for task-specific behavior.
@@ -51,8 +52,9 @@ class OllamaClient:
         except Exception as e:
             logger.error(f"Ollama error: {e}")
             return f"❌ System Error: {str(e)}"
+        return ""  # unreachable fallback
 
-    async def chat(self, messages: list[dict], system_prompt: str = None) -> str:
+    async def chat(self, messages: List[Dict[str, str]], system_prompt: Optional[str] = None) -> str:
         """
         Chat-style interaction using Ollama's /api/chat endpoint.
         messages: [{"role": "user"|"assistant", "content": "..."}]
@@ -88,8 +90,9 @@ class OllamaClient:
         except Exception as e:
             logger.error(f"Ollama chat error: {e}")
             return f"❌ System Error: {str(e)}"
+        return ""  # unreachable fallback
 
-    async def check_health(self) -> dict:
+    async def check_health(self) -> Dict[str, Any]:
         """Check Ollama server health and available models."""
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -109,8 +112,9 @@ class OllamaClient:
         except Exception as e:
             self._available = False
             return {"status": "offline", "error": str(e)}
+        return {"status": "unknown"}  # unreachable fallback
 
-    async def list_models(self) -> list[str]:
+    async def list_models(self) -> List[str]:
         """List available models on the Ollama server."""
         health = await self.check_health()
         return health.get("models", [])

@@ -6,7 +6,7 @@ import asyncio
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 from agent.orchestrator import orchestrator
 
@@ -15,7 +15,7 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     message: str
-    history: Optional[List[Dict]] = []
+    history: Optional[List[Dict[str, Any]]] = None
     stream: Optional[bool] = True
 
 
