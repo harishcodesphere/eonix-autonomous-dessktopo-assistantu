@@ -4,38 +4,50 @@ EONIX Backend — Main FastAPI Entry Point
 import os
 import sys
 import asyncio
+from typing import Any, Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
 
-# Ensure backend directory is in path
-sys.path.insert(0, os.path.dirname(__file__))
+# 1. Immediate path setup — ensures all internal imports work
+BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
+if BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, BACKEND_ROOT)
 
-from memory.db import init_db
-from api.routes_chat import router as chat_router
-from api.routes_system import router as system_router
-from api.routes_tasks import router as tasks_router
-from api.routes_voice import router as voice_router
-from api.routes_memory import router as memory_router
-from api.routes_ws import router as ws_router
-from brains.ollama_brain import OllamaBrain
-from brains.gemini_brain import GeminiBrain
-from brains.claude_brain import ClaudeBrain
-from agent.monitor import system_monitor
-from api.routes_ws import push_alert
-from agent.scheduler import scheduler
-from agent.plugin_loader import plugin_loader
-from tools.voice import voice_system
-from agent.orchestrator import AgentOrchestrator
+# 2. Guarded imports for third-party libraries
+try:
+    from fastapi import FastAPI, Request
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse, JSONResponse
+except ImportError:
+    print("❌ Critical Error: FastAPI and dependencies not found. Please install requirements.")
+    sys.exit(1)
 
-# Initialize global orchestrator for voice callback
-# (This avoids circular import issues by importing INSIDE callback or using global)
-orchestrator = None 
+# 3. Local module imports (guarded)
+try:
+    from memory.db import init_db
+    from api.routes_chat import router as chat_router
+    from api.routes_system import router as system_router
+    from api.routes_tasks import router as tasks_router
+    from api.routes_voice import router as voice_router
+    from api.routes_memory import router as memory_router
+    from api.routes_ws import router as ws_router, manager as ws_manager, push_alert
+    from brains.ollama_brain import OllamaBrain
+    from brains.gemini_brain import GeminiBrain
+    from brains.claude_brain import ClaudeBrain
+    from agent.monitor import system_monitor
+    from agent.scheduler import scheduler
+    from agent.plugin_loader import plugin_loader
+    from tools.voice import voice_system
+    from agent.orchestrator import orchestrator as global_orchestrator
+except ImportError as e:
+    print(f"⚠ Warning: Some local modules failed to load: {e}")
+    # We continue as some modules might be optional
 
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+# Global orchestrator reference
+orchestrator: Any = None 
+
+FRONTEND_DIR = os.path.join(os.path.dirname(BACKEND_ROOT), "frontend")
+DATA_DIR = os.path.join(BACKEND_ROOT, "data")
 
 
 @asynccontextmanager
@@ -51,14 +63,18 @@ async def lifespan(app: FastAPI):
     print("  Your Local JARVIS — Autonomous Desktop Agent")
     print("="*50)
 
-    # Initialize database
+    # Initialize directories
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, "audio"), exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, "screenshots"), exist_ok=True)
-    init_db()
-    print("✓ Database initialized")
+    
+    try:
+        init_db()
+        print("✓ Database initialized")
+    except Exception as e:
+        print(f"❌ Database Error: {e}")
 
-    # Check AI brains
+    # Initialize AI brains
     ollama = OllamaBrain()
     gemini = GeminiBrain()
     claude = ClaudeBrain()
@@ -80,46 +96,50 @@ async def lifespan(app: FastAPI):
 
     # Initialize Orchestrator
     global orchestrator
-    orchestrator = AgentOrchestrator()
+    from agent.orchestrator import orchestrator as _orchestrator
+    orchestrator = _orchestrator
     
     # Start Voice System
-    from api.routes_ws import manager
-
     async def broadcast_voice_status(status):
-        await manager.broadcast({"type": "voice_status", "status": status})
+        if 'ws_manager' in globals():
+            await ws_manager.broadcast({"type": "voice_status", "status": status})
 
-    voice_system.set_callback(orchestrator.handle_voice_command)
-    voice_system.set_status_callback(broadcast_voice_status)
-    voice_system.start()
-    print("✓ Voice System — READY (Listening)")
+    if 'voice_system' in globals():
+        voice_system.set_callback(orchestrator.handle_voice_command)
+        voice_system.set_status_callback(broadcast_voice_status)
+        voice_system.start()
+        print("✓ Voice System — READY (Listening)")
 
     # Start proactive monitor
-    system_monitor.on_alert(push_alert)
-    monitor_task = asyncio.create_task(system_monitor.start())
-    print("✓ Proactive Monitor — ONLINE")
+    if 'system_monitor' in globals():
+        system_monitor.on_alert(push_alert)
+        asyncio.create_task(system_monitor.start())
+        print("✓ Proactive Monitor — ONLINE")
 
     # Start scheduler
-    scheduler_task = asyncio.create_task(scheduler.start())
+    if 'scheduler' in globals():
+        asyncio.create_task(scheduler.start())
 
     # Load plugins
-    plugin_results = plugin_loader.load_all()
-    loaded_count = sum(1 for r in plugin_results.values() if r["success"])
-    print(f"✓ Plugins: {loaded_count}/{len(plugin_results)} loaded")
+    if 'plugin_loader' in globals():
+        plugin_results = plugin_loader.load_all()
+        loaded_count = sum(1 for r in plugin_results.values() if r["success"])
+        print(f"✓ Plugins: {loaded_count}/{len(plugin_results)} loaded")
 
     print(f"\n🚀 EONIX running at: http://127.0.0.1:8000")
     print("="*50 + "\n")
 
     yield
 
-    # Stop background tasks on shutdown
-    voice_system.stop()
-    system_monitor.stop()
-    monitor_task.cancel()
-    scheduler.stop()
-    scheduler_task.cancel()
-
     # ── Shutdown ─────────────────────────────────────────────
     print("\n🛑 EONIX shutting down...")
+    
+    if 'voice_system' in globals():
+        voice_system.stop()
+    if 'system_monitor' in globals():
+        system_monitor.stop()
+    if 'scheduler' in globals():
+        scheduler.stop()
 
 
 # ── App Setup ────────────────────────────────────────────────
@@ -147,26 +167,32 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"error": str(exc), "type": type(exc).__name__}
     )
 
-# ── API Routes ───────────────────────────────────────────────
-app.include_router(chat_router, prefix="/api", tags=["chat"])
-app.include_router(system_router, prefix="/api", tags=["system"])
-app.include_router(tasks_router, prefix="/api", tags=["tasks"])
-app.include_router(voice_router, prefix="/api", tags=["voice"])
-app.include_router(memory_router, prefix="/api", tags=["memory"])
-app.include_router(ws_router, tags=["websocket"])
+# ── API Routes (Include only if loaded) ──────────────────────
+try:
+    app.include_router(chat_router, prefix="/api", tags=["chat"])
+    app.include_router(system_router, prefix="/api", tags=["system"])
+    app.include_router(tasks_router, prefix="/api", tags=["tasks"])
+    app.include_router(voice_router, prefix="/api", tags=["voice"])
+    app.include_router(memory_router, prefix="/api", tags=["memory"])
+    app.include_router(ws_router, tags=["websocket"])
+except NameError:
+    pass
 
 # ── Briefing Endpoint ────────────────────────────────────────
 @app.get("/api/briefing")
 async def get_briefing():
     """Get a daily briefing summary."""
-    from agent.briefing import daily_briefing
-    briefing = await daily_briefing.generate()
-    text = daily_briefing.format_text(briefing)
-    return {"briefing": briefing, "text": text}
+    try:
+        from agent.briefing import daily_briefing
+        briefing = await daily_briefing.generate()
+        text = daily_briefing.format_text(briefing)
+        return {"briefing": briefing, "text": text}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 # ── Static Files ─────────────────────────────────────────────
-# Serve data/audio and data/screenshots
-app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
+if os.path.exists(DATA_DIR):
+    app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
 
 # ── Frontend ─────────────────────────────────────────────────
 @app.get("/")
@@ -192,11 +218,14 @@ async def serve_static(path: str):
 
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app", 
-        host="127.0.0.1", 
-        port=8000, 
-        reload=True,
-        log_level="warning"
-    )
+    try:
+        import uvicorn
+        uvicorn.run(
+            "main:app", 
+            host="127.0.0.1", 
+            port=8000, 
+            reload=True,
+            log_level="warning"
+        )
+    except ImportError:
+        print("❌ Uvicorn not found. Please install it.")

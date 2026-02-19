@@ -6,22 +6,26 @@ import re
 import time
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import AsyncGenerator, List, Dict, Any, Optional
+from typing import AsyncGenerator, List, Dict, Any, Optional, cast
 from dataclasses import dataclass, field
 
 # Thread pool for running blocking (synchronous) tools like Playwright
 _tool_executor = ThreadPoolExecutor(max_workers=4)
 
-from brains.ollama_brain import OllamaBrain
-from brains.gemini_brain import GeminiBrain
-from tools import ToolRegistry
-from agent.router import route, parse_brain_prefix
-from memory.db import get_db, init_db
-from memory.task_store import create_task, update_task, get_recent_tasks
-from memory.preference_store import get_preference, set_preference
-from memory.semantic import semantic_memory
-from agent.personality import PersonalityEngine
-from ai.chatbot import chatbot as chatbot_engine
+try:
+    from brains.ollama_brain import OllamaBrain
+    from brains.gemini_brain import GeminiBrain
+    from tools import ToolRegistry
+    from agent.router import route, parse_brain_prefix
+    from memory.db import get_db, init_db
+    from memory.task_store import create_task, update_task, get_recent_tasks
+    from memory.preference_store import get_preference, set_preference
+    from memory.semantic import semantic_memory
+    from agent.personality import PersonalityEngine
+    from ai.chatbot import chatbot as chatbot_engine
+except ImportError:
+    # Failures here are handled by the IDE settings, but we guard for runtime
+    pass
 
 
 @dataclass
@@ -45,7 +49,7 @@ class AgentOrchestrator:
         self.personality = PersonalityEngine()
         self._default_brain = "auto"
 
-    def _intercept_known_commands(self, text: str) -> Optional[dict]:
+    def _intercept_known_commands(self, text: str) -> Optional[Dict[str, Any]]:
         """
         Pattern-match well-known commands and return a hardcoded plan.
         This bypasses the AI for commands where the AI consistently fails.
@@ -290,27 +294,28 @@ class AgentOrchestrator:
             brain = "local"
 
         # 5. Execute with chosen brain
-        actions = []
+        actions: List[Dict[str, Any]] = []
         reply = ""
 
-        plan: Dict[str, Any] = {}
+        plan_raw: Dict[str, Any] = {}
         try:
             # ── Keyword interceptor (bypasses AI for known command patterns) ──
             intercepted = self._intercept_known_commands(clean_input)
             
             if intercepted is not None:
-                plan = intercepted
+                plan_raw = intercepted
             else:
                 # ── MEMORY INJECTION ──
                 memory_context = self._get_memory_context(clean_input)
                 augmented_input = memory_context + clean_input
                 
                 if brain == "gemini" and gemini_ok:
-                    plan = self.gemini.plan(augmented_input)
+                    plan_raw = await self.gemini.plan(augmented_input)
                 else:
-                    plan = self.ollama.plan(augmented_input)
+                    plan_raw = await self.ollama.plan(augmented_input)
                     brain = "local"
 
+            plan = cast(Dict[str, Any], plan_raw)
             reply = plan.get("response", "Done!")
             steps = plan.get("steps", [])
 
@@ -328,7 +333,7 @@ class AgentOrchestrator:
                     # Keep the original plan response as fallback
 
             # Execute each step
-            loop = asyncio.get_event_loop()
+            loop = cast(Any, asyncio.get_event_loop())
             for step in steps:
                 tool_name = step.get("tool", "")
                 tool_args = step.get("args", {})
@@ -345,7 +350,11 @@ class AgentOrchestrator:
                                 ("shutdown" in description.lower())
                 
                 # Check config.REQUIRE_CONFIRMATION (default false for now)
-                from config import REQUIRE_CONFIRMATION
+                try:
+                    from config import REQUIRE_CONFIRMATION
+                except ImportError:
+                    REQUIRE_CONFIRMATION = False
+
                 if is_destructive and REQUIRE_CONFIRMATION:
                     # In a real app, we'd emit a confirmation request event
                     reply = f"⚠️ Safety Stop: I need your confirmation to execute '{tool_name}' ({description}). Action blocked."
@@ -430,10 +439,13 @@ class AgentOrchestrator:
         yield {"type": "thinking", "brain": brain, "message": f"Thinking with {brain.upper()} brain..."}
 
         # Get plan — try keyword interceptor first
+        plan: Dict[str, Any] = {}
         try:
-            plan = self._intercept_known_commands(clean_input)
+            intercepted = self._intercept_known_commands(clean_input)
             
-            if plan is None:
+            if intercepted is not None:
+                plan = intercepted
+            else:
                 # ── MEMORY + MOOD INJECTION ──
                 memory_context = self._get_memory_context(clean_input)
                 mood = self.personality.detect_mood(clean_input)
@@ -444,9 +456,9 @@ class AgentOrchestrator:
                 augmented_input = mood_context + memory_context + clean_input
 
                 if brain == "gemini" and gemini_ok:
-                    plan = self.gemini.plan(augmented_input)
+                    plan = await self.gemini.plan(augmented_input)
                 else:
-                    plan = self.ollama.plan(augmented_input)
+                    plan = await self.ollama.plan(augmented_input)
                     brain = "local"
         except Exception as e:
             yield {"type": "complete", "reply": f"Error: {str(e)}", "brain": brain, "actions": [], "duration_ms": 0}
@@ -454,7 +466,7 @@ class AgentOrchestrator:
 
         steps = plan.get("steps", [])
         reply = plan.get("response", "Done!")
-        actions = []
+        actions: List[Dict[str, Any]] = []
 
         # ── CHATBOT ROUTING ──
         # If no tool steps → it's a general question → route to chatbot
@@ -473,7 +485,7 @@ class AgentOrchestrator:
         # Execute steps and stream updates
         db = get_db()
         task = create_task(db, clean_input, brain)
-        loop = asyncio.get_event_loop()
+        loop = cast(Any, asyncio.get_event_loop())
 
         for i, step in enumerate(steps):
             tool_name = step.get("tool", "")
@@ -527,7 +539,7 @@ class AgentOrchestrator:
         """Handle built-in slash commands."""
         parts = cmd.split()
         command = parts[0].lower()
-        args: List[str] = list(parts[1:]) if len(parts) > 1 else []  # type: ignore[index]
+        args: List[str] = list(parts[1:]) if len(parts) > 1 else []
 
         if command == "/help":
             reply = """**EONIX Slash Commands:**
@@ -542,19 +554,20 @@ class AgentOrchestrator:
 • `/preferences` — Show stored preferences"""
 
         elif command == "/status":
-            from tools.system_info import SystemInfo
-            si = SystemInfo()
-            data = si.get_all()
-            cpu = data.get('cpu', {})
-            mem = data.get('memory', {})
-            disk = data.get('disk', {})
-            battery = data.get('battery')
-            ollama_status = "🟢 Online" if self.ollama.is_available() else "🔴 Offline"
-            gemini_status = "🟢 Online" if self.gemini.is_available() else "🔴 Offline"
-            battery_str = "Desktop (no battery)"
-            if battery and isinstance(battery, dict):
-                battery_str = f"{battery.get('percent', '?')}% ({'charging' if battery.get('plugged') else 'on battery'})"
-            reply = f"""**System Status:**
+            try:
+                from tools.system_info import SystemInfo
+                si = SystemInfo()
+                data = si.get_all()
+                cpu = data.get('cpu', {})
+                mem = data.get('memory', {})
+                disk = data.get('disk', {})
+                battery = data.get('battery')
+                ollama_status = "🟢 Online" if self.ollama.is_available() else "🔴 Offline"
+                gemini_status = "🟢 Online" if self.gemini.is_available() else "🔴 Offline"
+                battery_str = "Desktop (no battery)"
+                if battery and isinstance(battery, dict):
+                    battery_str = f"{battery.get('percent', '?')}% ({'charging' if battery.get('plugged') else 'on battery'})"
+                reply = f"""**System Status:**
 • CPU: {cpu.get('percent', '?')}% ({cpu.get('cores', '?')} cores)
 • RAM: {mem.get('used_gb', '?')}GB / {mem.get('total_gb', '?')}GB ({mem.get('percent', '?')}%)
 • Disk: {disk.get('used_gb', '?')}GB / {disk.get('total_gb', '?')}GB ({disk.get('percent', '?')}%)
@@ -564,6 +577,8 @@ class AgentOrchestrator:
 • Ollama (Local): {ollama_status}
 • Gemini: {gemini_status}
 • Active Brain: {self._default_brain.upper()}"""
+            except Exception as e:
+                reply = f"Error getting status: {e}"
 
         elif command == "/memory":
             db = get_db()
@@ -600,8 +615,11 @@ class AgentOrchestrator:
 
         elif command == "/preferences":
             db = get_db()
-            from memory.preference_store import get_all_preferences
-            prefs = get_all_preferences(db)
+            try:
+                from memory.preference_store import get_all_preferences
+                prefs = get_all_preferences(db)
+            except ImportError:
+                prefs = {}
             db.close()
             if not prefs:
                 reply = "No preferences stored yet."
@@ -612,10 +630,12 @@ class AgentOrchestrator:
                 reply = "\n".join(lines)
 
         elif command == "/briefing":
-            from agent.briefing import daily_briefing
-            import asyncio
-            briefing = asyncio.get_event_loop().run_until_complete(daily_briefing.generate())
-            reply = daily_briefing.format_text(briefing)
+            try:
+                from agent.briefing import daily_briefing
+                briefing = asyncio.get_event_loop().run_until_complete(daily_briefing.generate())
+                reply = daily_briefing.format_text(briefing)
+            except Exception as e:
+                reply = f"Briefing Error: {e}"
 
         else:
             reply = f"Unknown command: {cmd}\nType `/help` for available commands."
@@ -631,17 +651,20 @@ class AgentOrchestrator:
         if intercept:
             print(f"⚡ Fast-tracked: {intercept['intent']}")
             # Execute intercept plan
-            from tools.voice_engine import voice_engine
-            
-            # Speak response first
-            if intercept.get("response"):
-                 await voice_engine.speak(intercept["response"])
+            try:
+                from tools.voice_engine import voice_engine
+                
+                # Speak response first
+                if intercept.get("response"):
+                     await voice_engine.speak(intercept["response"])
 
-            # Execute steps
-            for step in intercept.get("steps", []):
-                tool_name = step["tool"]
-                args = step.get("args", {})
-                await self.tools.execute(tool_name, **args)
+                # Execute steps
+                for step in intercept.get("steps", []):
+                    tool_name = step["tool"]
+                    args = step.get("args", {})
+                    await self.tools.execute(tool_name, **args)
+            except Exception as e:
+                print(f"Voice Command Fast-track Error: {e}")
             return
 
         # 2. AI Processing
@@ -656,8 +679,11 @@ class AgentOrchestrator:
             # Speak response
             response_text = plan.get("response", "")
             if response_text:
-                from tools.voice_engine import voice_engine
-                await voice_engine.speak(response_text)
+                try:
+                    from tools.voice_engine import voice_engine
+                    await voice_engine.speak(response_text)
+                except ImportError:
+                    pass
                 
             # Execute steps
             for step in plan.get("steps", []):
@@ -667,12 +693,18 @@ class AgentOrchestrator:
                     await self.tools.execute(tool_name, **args)
                 except Exception as e:
                     print(f"❌ Tool Error: {e}")
-                    from tools.voice_engine import voice_engine
-                    await voice_engine.speak(f"I encountered an error: {e}")
+                    try:
+                        from tools.voice_engine import voice_engine
+                        await voice_engine.speak(f"I encountered an error: {e}")
+                    except ImportError:
+                        pass
         except Exception as e:
             print(f"Plan Error: {e}")
-            from tools.voice_engine import voice_engine
-            await voice_engine.speak("I'm sorry, I couldn't process that.")
+            try:
+                from tools.voice_engine import voice_engine
+                await voice_engine.speak("I'm sorry, I couldn't process that.")
+            except ImportError:
+                pass
 
     def set_default_brain(self, brain: str):
         self._default_brain = brain
